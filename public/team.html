@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team — Hitster Bingo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="page" style="max-width:480px;margin:0 auto">
+    <div id="conn" class="conn off"></div>
+
+    <!-- Setup -->
+    <div id="sec-setup" class="flex flex-col items-center justify-center" style="min-height:100vh">
+      <div class="card card-glow" style="max-width:400px;width:100%">
+        <h2 style="text-align:center;margin-bottom:1.5rem;color:var(--cyan)">Team Setup</h2>
+        <label style="font-size:.85rem;color:var(--text-dim);display:block;margin-bottom:.25rem">Teamname</label>
+        <input id="input-name" class="input mb" type="text" placeholder="Euer Teamname..." maxlength="20" autofocus>
+        <label style="font-size:.85rem;color:var(--text-dim);display:block;margin-bottom:.5rem">Team-Emoji</label>
+        <div id="emoji-grid" class="emoji-picker mb"></div>
+        <button id="btn-join" class="btn btn-primary w-full mt" disabled>Beitreten</button>
+      </div>
+    </div>
+
+    <!-- Game -->
+    <div id="sec-game" class="hidden">
+      <!-- Header -->
+      <div class="flex items-center justify-between mb">
+        <div class="flex items-center gap-sm">
+          <span id="my-emoji" style="font-size:1.5rem">🚀</span>
+          <h2 id="my-name" style="font-size:1rem">Team</h2>
+        </div>
+        <div id="timer" class="timer hidden">1:00</div>
+      </div>
+
+      <!-- Waiting -->
+      <div id="sec-waiting" class="card text-center mt-lg">
+        <p style="color:var(--text-dim);font-family:var(--font-display);font-size:.9rem">Warte auf nächste Runde...</p>
+        <h3 style="font-size:.85rem;margin:.75rem 0;color:var(--cyan)">Deine Bingokarte</h3>
+        <div id="bingo-waiting"></div>
+      </div>
+
+      <!-- Answer -->
+      <div id="sec-answer" class="hidden">
+        <div id="answer-category" class="text-center mb"></div>
+        <div id="answer-form" class="card card-glow">
+          <label style="font-size:.85rem;color:var(--text-dim);display:block;margin-bottom:.5rem">Eure Antwort</label>
+          <input id="input-answer" class="input mb" type="text" placeholder="Antwort eingeben...">
+          <button id="btn-submit" class="btn btn-primary w-full">Abschicken</button>
+        </div>
+        <div id="answer-sent" class="card text-center hidden" style="border-color:var(--green)">
+          <p style="color:var(--green);font-family:var(--font-display)">✓ Antwort gesendet!</p>
+          <p id="answer-echo" style="color:var(--text-dim);font-size:.85rem;margin-top:.5rem"></p>
+        </div>
+        <h3 style="font-size:.85rem;margin:.75rem 0;color:var(--cyan);text-align:center">Deine Bingokarte</h3>
+        <div id="bingo-play"></div>
+      </div>
+
+      <!-- Reveal -->
+      <div id="sec-reveal" class="hidden">
+        <div id="reveal-song" class="card card-glow reveal mb"></div>
+        <h3 style="font-size:.85rem;margin:.75rem 0;color:var(--cyan);text-align:center">Deine Bingokarte</h3>
+        <div id="bingo-reveal"></div>
+      </div>
+
+      <!-- Bingo! -->
+      <div id="sec-bingo" class="card bingo-winner text-center mt hidden" style="padding:2rem">
+        <h2 style="font-size:2rem;color:var(--gold)">BINGO!</h2>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/shared.js"></script>
+  <script src="/js/team.js"></script>
+</body>
+</html>

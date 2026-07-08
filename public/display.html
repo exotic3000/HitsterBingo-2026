@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beamer — Hitster Bingo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .wheel-stage {
+      position: relative;
+      width: 500px;
+      height: 500px;
+      margin: 0 auto;
+    }
+    @media(max-width:768px) { .wheel-stage { width: 320px; height: 320px; } }
+
+    .wheel-stage canvas {
+      width: 100%;
+      height: 100%;
+      filter: drop-shadow(0 0 30px rgba(124,58,237,.4));
+    }
+
+    .wheel-pointer-svg {
+      position: absolute;
+      top: -24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      filter: drop-shadow(0 0 12px rgba(255,214,10,.7));
+    }
+
+    .wheel-outer-ring {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      border: 4px solid transparent;
+      pointer-events: none;
+      transition: border-color .5s, box-shadow .5s;
+    }
+    .wheel-outer-ring.glowing {
+      border-color: var(--gold);
+      box-shadow: 0 0 40px rgba(255,214,10,.4), 0 0 80px rgba(255,214,10,.15), inset 0 0 40px rgba(255,214,10,.1);
+    }
+
+    #particles-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .result-overlay {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 2rem;
+      padding: 1rem 2.5rem;
+      border-radius: 16px;
+      background: rgba(10, 14, 39, .7);
+      border: 2px solid transparent;
+      opacity: 0;
+      transform: translateY(20px);
+      pointer-events: none;
+      transition: opacity .6s, transform .6s, border-color .6s, box-shadow .6s;
+    }
+    .result-overlay.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .result-overlay.visible .result-label {
+      border-color: currentColor;
+    }
+    .result-icon {
+      font-size: 3rem;
+      animation: resultBounce .8s ease-out;
+      flex-shrink: 0;
+    }
+    .result-text { text-align: left; }
+    .result-label {
+      font-family: var(--font-display);
+      font-size: 2.2rem;
+      font-weight: 900;
+      text-shadow: 0 0 30px currentColor;
+    }
+    .result-sub {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      color: var(--gold);
+      margin-top: .25rem;
+    }
+    .result-overlay.visible {
+      border-color: var(--gold);
+      box-shadow: 0 0 30px rgba(255,214,10,.15), 0 0 60px rgba(124,58,237,.15);
+    }
+    @keyframes resultBounce {
+      0% { transform: scale(0) rotate(-180deg); opacity: 0; }
+      60% { transform: scale(1.3) rotate(10deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+
+    /* Lobby info below wheel */
+    .lobby-info {
+      text-align: center;
+      margin-top: 2rem;
+    }
+
+    /* Spotify player area */
+    #spotify-player-area {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: .75rem 1.5rem;
+      z-index: 50;
+      display: none;
+    }
+    #spotify-player-area.active { display: flex; align-items: center; gap: 1rem; }
+    #spotify-cover { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; }
+    #spotify-now { flex: 1; }
+    #spotify-now .sp-title { font-weight: 600; font-size: .9rem; }
+    #spotify-now .sp-artist { color: var(--text-dim); font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <canvas id="particles-canvas"></canvas>
+  <div class="page" style="position:relative;z-index:1">
+    <div id="conn" class="conn off"></div>
+
+    <!-- Header -->
+    <div class="flex justify-between items-center mb">
+      <h1 class="page-title" style="margin:0;font-size:1.5rem">Hitster Bingo</h1>
+      <div id="timer" class="timer hidden">1:00</div>
+    </div>
+
+    <!-- Wheel — always visible -->
+    <div id="sec-wheel" class="flex flex-col items-center justify-center" style="min-height:60vh">
+      <h2 id="round-label" style="text-align:center;color:var(--gold);margin-bottom:1.5rem;font-family:var(--font-display);font-size:1.3rem"></h2>
+      <div class="wheel-stage">
+        <div class="wheel-outer-ring" id="wheel-ring"></div>
+        <svg class="wheel-pointer-svg" width="36" height="40" viewBox="0 0 36 40">
+          <polygon points="18,40 0,0 36,0" fill="#ffd60a" stroke="#fff" stroke-width="1.5"/>
+        </svg>
+        <canvas id="wheel-canvas" width="600" height="600"></canvas>
+      </div>
+
+      <!-- Category result shown below wheel -->
+      <div class="result-overlay" id="result-overlay">
+        <div class="result-icon" id="result-icon"></div>
+        <div class="result-text">
+          <div class="result-label" id="result-label"></div>
+          <div class="result-sub" id="result-sub"></div>
+        </div>
+      </div>
+
+      <!-- Lobby info shown below wheel -->
+      <div id="lobby-info" class="lobby-info">
+        <p id="lobby-count" style="color:var(--text-dim);margin-bottom:1rem;font-family:var(--font-display);font-size:.9rem">0 Teams verbunden</p>
+        <div id="lobby-teams" class="flex gap-sm justify-center flex-wrap"></div>
+      </div>
+    </div>
+
+    <!-- Playing — team submission status -->
+    <div id="sec-playing" class="flex flex-col items-center hidden" style="gap:2rem;margin-top:1rem">
+      <div id="play-category"></div>
+      <div id="play-teams" class="flex gap-sm justify-center flex-wrap"></div>
+    </div>
+
+    <!-- Revealing — solution -->
+    <div id="sec-revealing" class="flex flex-col items-center hidden" style="gap:2rem;margin-top:1rem">
+      <div id="reveal-category"></div>
+      <div id="reveal-song" class="card card-glow reveal" style="max-width:500px;width:100%"></div>
+    </div>
+  </div>
+
+  <!-- Spotify player bar -->
+  <div id="spotify-player-area">
+    <img id="spotify-cover" src="" alt="">
+    <div id="spotify-now"><div class="sp-title"></div><div class="sp-artist"></div></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/shared.js"></script>
+  <script src="/js/display.js"></script>
+</body>
+</html>

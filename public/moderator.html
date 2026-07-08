@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moderation — Hitster Bingo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .spotify-bar { display: flex; align-items: center; gap: .75rem; padding: .75rem; background: var(--surface-light); border-radius: 12px; margin-bottom: .5rem; }
+    .spotify-bar.connected { border: 1px solid var(--green); }
+    .spotify-bar.disconnected { border: 1px solid var(--pink); }
+
+    .search-results { max-height: 350px; overflow-y: auto; }
+    .search-result {
+      display: flex; align-items: center; gap: .75rem;
+      padding: .5rem; border-radius: 10px; cursor: pointer;
+      transition: background .2s;
+    }
+    .search-result:hover { background: var(--surface-light); }
+    .search-result img { width: 48px; height: 48px; border-radius: 6px; flex-shrink: 0; }
+    .search-result .meta { flex: 1; overflow: hidden; }
+    .search-result .meta .t { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .search-result .meta .a { color: var(--text-dim); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .search-result .yr { color: var(--accent-glow); font-family: var(--font-display); font-size: .75rem; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div id="conn" class="conn off"></div>
+
+    <div class="flex justify-between items-center mb">
+      <h1 class="page-title" style="margin:0;font-size:1.3rem">Moderation</h1>
+      <div id="timer" class="timer hidden">1:00</div>
+    </div>
+
+    <!-- Spotify Status -->
+    <div id="spotify-bar" class="spotify-bar disconnected mb">
+      <span id="spotify-icon" style="font-size:1.2rem">🔇</span>
+      <span id="spotify-status" style="font-size:.85rem">Spotify nicht verbunden</span>
+      <a id="spotify-link" href="http://127.0.0.1:3000/auth/spotify" target="_blank" class="btn btn-secondary" style="margin-left:auto;padding:.4rem .8rem;font-size:.7rem">Verbinden</a>
+    </div>
+
+    <!-- Controls -->
+    <div class="card mb" style="max-width:650px">
+      <div id="controls" class="flex gap-sm flex-wrap items-center"></div>
+
+      <!-- Song selection (shown during spinning) -->
+      <div id="song-form" class="hidden mt">
+        <div id="ctrl-category" class="mb"></div>
+
+        <!-- Spotify search -->
+        <div id="spotify-search" class="hidden mb">
+          <div class="flex gap-sm">
+            <input id="input-search" class="input" style="flex:1" placeholder="Song suchen auf Spotify...">
+            <button id="btn-search" class="btn btn-secondary">Suchen</button>
+          </div>
+          <div id="search-results" class="search-results mt"></div>
+        </div>
+
+        <!-- Manual fallback -->
+        <div id="manual-form">
+          <div id="toggle-manual" class="hidden" style="margin-bottom:.5rem">
+            <button id="btn-toggle-manual" class="btn btn-secondary" style="font-size:.7rem;padding:.3rem .6rem">Manuell eingeben</button>
+          </div>
+          <div id="manual-fields" class="flex gap-sm flex-wrap">
+            <input id="input-title" class="input" style="flex:1;min-width:120px" placeholder="Songtitel">
+            <input id="input-artist" class="input" style="flex:1;min-width:120px" placeholder="Interpret">
+            <input id="input-year" class="input" style="width:80px" placeholder="Jahr">
+          </div>
+          <button id="btn-start-song" class="btn btn-success w-full mt">Song starten &amp; Timer los</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Current song -->
+    <div id="sec-song" class="card mb hidden" style="max-width:650px;border-color:var(--gold)">
+      <div id="song-display" class="text-center" style="padding:.5rem"></div>
+    </div>
+
+    <!-- Answers -->
+    <div id="sec-answers" class="card mb hidden" style="max-width:650px">
+      <h3 style="font-size:.9rem;margin-bottom:.75rem;color:var(--cyan)">Antworten der Teams</h3>
+      <div id="answer-list"></div>
+    </div>
+
+    <!-- Team Bingo Cards -->
+    <h3 style="font-size:.9rem;margin-bottom:.75rem;color:var(--cyan)">Bingokarten der Teams</h3>
+    <div id="team-cards" class="teams-grid"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/shared.js"></script>
+  <script src="/js/moderator.js"></script>
+</body>
+</html>
