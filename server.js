@@ -79,19 +79,27 @@ function pickWeightedRandom(items) {
   return items[items.length - 1];
 }
 
+// Linear coefficients (a,b) for L[r][c] = (a*r + b*c + d) mod 5 that keep
+// every row, column AND both diagonals a permutation of all 5 categories
+// (a "Knut Vik" style Latin square). Picking randomly among these plus a
+// random offset d and a random category order gives a fresh, well-shuffled
+// layout each time while preserving the one-of-each guarantee.
+const LATIN_COEFFS = [
+  [1, 2], [1, 3], [2, 1], [2, 4],
+  [3, 1], [3, 4], [4, 2], [4, 3],
+];
+
 function generateBingoCard() {
-  // 25 cells, each category appears exactly 5 times, shuffled randomly
-  const ids = [];
-  for (const cat of CATEGORIES) {
-    for (let i = 0; i < BINGO_SIZE; i++) ids.push(cat.id);
-  }
-  const shuffled = shuffle(ids);
+  const catOrder = shuffle(CATEGORIES).map(cat => cat.id);
+  const [a, b] = LATIN_COEFFS[Math.floor(Math.random() * LATIN_COEFFS.length)];
+  const d = Math.floor(Math.random() * BINGO_SIZE);
 
   const card = [];
   for (let r = 0; r < BINGO_SIZE; r++) {
     const row = [];
     for (let c = 0; c < BINGO_SIZE; c++) {
-      row.push({ categoryId: shuffled[r * BINGO_SIZE + c], checked: false });
+      const idx = (a * r + b * c + d) % BINGO_SIZE;
+      row.push({ categoryId: catOrder[idx], checked: false });
     }
     card.push(row);
   }
@@ -472,6 +480,8 @@ server.listen(PORT, () => {
   console.log('    Moderation:  http://localhost:' + PORT + '/moderator.html');
   console.log('    Team:        http://localhost:' + PORT + '/team.html');
   console.log('    Übersicht:   http://localhost:' + PORT + '/overview.html');
+  console.log('    Teamer:      http://localhost:' + PORT + '/teamer.html');
+  console.log('    Bingokarten: http://localhost:' + PORT + '/boards.html');
   console.log('');
   if (SPOTIFY_CLIENT_ID) {
     console.log('  Spotify Auth:  http://127.0.0.1:' + PORT + '/auth/spotify');
