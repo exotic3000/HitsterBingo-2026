@@ -5,10 +5,10 @@
   const socket = connectSocket();
   socket.emit('join', { role: 'teamer' });
 
-  const STORAGE_KEY = 'hitster_teamer_team_id';
-  let myTeamId = localStorage.getItem(STORAGE_KEY) || null;
+  let myTeamId = null;
 
   const teamListEl = document.getElementById('team-list');
+  let lastState = null;
 
   function renderTeamList(teams) {
     if (!teams.length) {
@@ -27,25 +27,12 @@
     });
   }
 
-  function selectTeam(teamId) {
-    myTeamId = teamId;
-    localStorage.setItem(STORAGE_KEY, teamId);
-  }
-
-  document.getElementById('btn-switch').addEventListener('click', () => {
-    myTeamId = null;
-    localStorage.removeItem(STORAGE_KEY);
-    hide('sec-card');
-    show('sec-select');
-  });
-
-  socket.on('game_state', (state) => {
+  function render(state) {
     const teams = Object.values(state.teams);
     renderTeamList(teams);
 
     if (myTeamId && !state.teams[myTeamId]) {
       myTeamId = null;
-      localStorage.removeItem(STORAGE_KEY);
     }
 
     if (myTeamId) {
@@ -68,5 +55,21 @@
       show('sec-select');
       hide('sec-card');
     }
+  }
+
+  function selectTeam(teamId) {
+    myTeamId = teamId;
+    if (lastState) render(lastState);
+  }
+
+  document.getElementById('btn-switch').addEventListener('click', () => {
+    myTeamId = null;
+    hide('sec-card');
+    show('sec-select');
+  });
+
+  socket.on('game_state', (state) => {
+    lastState = state;
+    render(state);
   });
 })();
