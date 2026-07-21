@@ -20,6 +20,9 @@ const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'b31d81165bba
 const PORT = process.env.PORT || 3000;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:' + PORT + '/auth/spotify/callback';
 
+// Playlists
+const SPOTIFY_PLAYLIST = 'https://open.spotify.com/playlist/4QsXN56c7y8hH0v6EEnHRa?si=b107b7adf82f49a2';
+
 let spotifyAccessToken = null;
 let spotifyRefreshToken = null;
 let spotifyTokenExpiry = 0;
@@ -161,7 +164,7 @@ function startTimer() {
 // ── Spotify OAuth ───────────────────────────────────────────────
 
 app.get('/auth/spotify/debug', (req, res) => {
-  const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
+  const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
   const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
     response_type: 'code',
     client_id: SPOTIFY_CLIENT_ID,
@@ -182,7 +185,7 @@ app.get('/auth/spotify', (req, res) => {
   if (!SPOTIFY_CLIENT_ID) {
     return res.status(500).send('SPOTIFY_CLIENT_ID nicht gesetzt. Starte den Server mit: SPOTIFY_CLIENT_ID=xxx SPOTIFY_CLIENT_SECRET=yyy node server.js');
   }
-  const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
+  const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
   const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
     response_type: 'code',
     client_id: SPOTIFY_CLIENT_ID,
@@ -267,6 +270,28 @@ app.get('/api/spotify/token', async (req, res) => {
   res.json({ token });
 });
 
+function mapTrack(t) {
+  return {
+    spotifyUri: t.uri,
+    spotifyId: t.id,
+    title: t.name,
+    artist: t.artists.map(a => a.name).join(', '),
+    album: t.album.name,
+    year: t.album.release_date?.substring(0, 4) || '',
+    cover: t.album.images?.[0]?.url || '',
+    previewUrl: t.preview_url,
+    durationMs: t.duration_ms,
+  };
+}
+
+function extractPlaylistId(input) {
+  if (!input) return null;
+  const match = input.match(/playlist[:/]([a-zA-Z0-9]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9]+$/.test(input.trim())) return input.trim();
+  return null;
+}
+
 app.get('/api/spotify/search', async (req, res) => {
   const token = await getValidToken();
   if (!token) return res.status(401).json({ error: 'Nicht mit Spotify verbunden' });
@@ -281,18 +306,48 @@ app.get('/api/spotify/search', async (req, res) => {
       headers: { 'Authorization': 'Bearer ' + token },
     });
     const data = await resp.json();
-    const tracks = (data.tracks?.items || []).map(t => ({
-      spotifyUri: t.uri,
-      spotifyId: t.id,
-      title: t.name,
-      artist: t.artists.map(a => a.name).join(', '),
-      album: t.album.name,
-      year: t.album.release_date?.substring(0, 4) || '',
-      cover: t.album.images?.[0]?.url || '',
-      previewUrl: t.preview_url,
-      durationMs: t.duration_ms,
-    }));
+    const tracks = (data.tracks?.items || []).map(mapTrack);
     res.json({ tracks });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/spotify/playlist-random', async (req, res) => {
+  const token = await getValidToken();
+  if (!token) return res.status(401).json({ error: 'Nicht mit Spotify verbunden' });
+
+  const playlistId = extractPlaylistId(SPOTIFY_PLAYLIST);
+  if (!playlistId) return res.status(400).json({ error: 'Keine Playlist im Code hinterlegt (SPOTIFY_PLAYLIST in server.js)' });
+
+  try {
+    const metaResp = await fetch(
+      'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=tracks.total',
+      { headers: { 'Authorization': 'Bearer ' + token } }
+    );
+    const meta = await metaResp.json();
+    console.log('[playlist-random] playlistId=' + playlistId + ' status=' + metaResp.status + ' body=' + JSON.stringify(meta));
+    if (!metaResp.ok) return res.status(metaResp.status).json({ error: meta.error?.message || 'Playlist nicht gefunden' });
+
+    const total = meta.tracks?.total || 0;
+    if (!total) return res.status(404).json({ error: 'Playlist ist leer — Spotify-Antwort: ' + JSON.stringify(meta) });
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const offset = Math.floor(Math.random() * total);
+      const resp = await fetch(
+        'https://api.spotify.com/v1/playlists/' + playlistId + '/tracks?' + querystring.stringify({
+          limit: 1, offset, market: 'DE',
+          fields: 'items(track(name,uri,id,artists,album,preview_url,duration_ms,is_local))',
+        }),
+        { headers: { 'Authorization': 'Bearer ' + token } }
+      );
+      const data = await resp.json();
+      const track = data.items?.[0]?.track;
+      if (track && !track.is_local && track.uri) {
+        return res.json({ track: mapTrack(track) });
+      }
+    }
+    res.status(404).json({ error: 'Kein abspielbarer Song in der Playlist gefunden' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

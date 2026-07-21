@@ -5,7 +5,6 @@
   socket.emit('join', { role: 'moderator' });
 
   const controlsEl = document.getElementById('controls');
-  const timerEl = document.getElementById('timer');
   let selectedSong = null;
   let searchTimeout = null;
   let spotifyConnected = false;
@@ -87,6 +86,25 @@
       '<div class="meta"><div class="t">' + track.title + '</div><div class="a">' + track.artist + '</div></div>' +
       '<span style="color:var(--green);font-size:.8rem">Ausgewählt ✓</span></div>';
   }
+
+  // ── Random song from playlist ──────────────────────────────────
+
+  const randomBtn = document.getElementById('btn-random-song');
+
+  randomBtn.addEventListener('click', async () => {
+    resultsEl.innerHTML = '<p style="color:var(--text-dim);padding:.5rem">Wähle zufälligen Song...</p>';
+    try {
+      const resp = await fetch('/api/spotify/playlist-random');
+      const data = await resp.json();
+      if (data.error) {
+        resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">' + data.error + '</p>';
+        return;
+      }
+      selectSpotifyTrack(data.track);
+    } catch (e) {
+      resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">Fehler: ' + e.message + '</p>';
+    }
+  });
 
   // ── Start song ─────────────────────────────────────────────────
 
@@ -181,14 +199,6 @@
       hide('song-form');
     }
 
-    // Timer
-    if (gs === 'playing' || gs === 'revealing') {
-      timerEl.classList.remove('hidden');
-      renderTimer(timerEl, state.timerValue);
-    } else {
-      timerEl.classList.add('hidden');
-    }
-
     // Current song
     if (state.currentSong && (gs === 'playing' || gs === 'revealing')) {
       show('sec-song');
@@ -254,7 +264,4 @@
     });
   });
 
-  socket.on('timer_tick', (val) => {
-    if (!timerEl.classList.contains('hidden')) renderTimer(timerEl, val);
-  });
 })();
