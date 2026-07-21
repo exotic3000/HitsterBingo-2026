@@ -299,20 +299,6 @@
         console.log('Spotify Player ready, device:', data.device_id);
       });
 
-      spotifyPlayer.addListener('player_state_changed', function(state) {
-        if (!state) return;
-        var track = state.track_window && state.track_window.current_track;
-        var area = document.getElementById('spotify-player-area');
-        if (track && !state.paused) {
-          area.classList.add('active');
-          document.getElementById('spotify-cover').src = (track.album && track.album.images && track.album.images[0] && track.album.images[0].url) || '';
-          document.querySelector('#spotify-now .sp-title').textContent = track.name;
-          document.querySelector('#spotify-now .sp-artist').textContent = (track.artists || []).map(function(a) { return a.name; }).join(', ');
-        } else {
-          area.classList.remove('active');
-        }
-      });
-
       await spotifyPlayer.connect();
     } catch (e) {
       console.log('Spotify SDK not available:', e.message);
@@ -335,7 +321,6 @@
       if (spotifyPlayer) spotifyPlayer.pause();
       await fetch('/api/spotify/pause', { method: 'PUT' });
     } catch (e) { /* ignore */ }
-    document.getElementById('spotify-player-area').classList.remove('active');
   });
 
   initSpotifyPlayer();

@@ -154,7 +154,6 @@ function startTimer() {
     io.emit('timer_tick', timerValue);
     if (timerValue <= 0) {
       clearTimer();
-      gameState = 'revealing';
       io.emit('spotify_pause');
       broadcast();
     }
@@ -322,28 +321,29 @@ app.get('/api/spotify/playlist-random', async (req, res) => {
 
   try {
     const metaResp = await fetch(
-      'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=tracks.total',
+      'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=items.total',
       { headers: { 'Authorization': 'Bearer ' + token } }
     );
     const meta = await metaResp.json();
     console.log('[playlist-random] playlistId=' + playlistId + ' status=' + metaResp.status + ' body=' + JSON.stringify(meta));
     if (!metaResp.ok) return res.status(metaResp.status).json({ error: meta.error?.message || 'Playlist nicht gefunden' });
 
-    const total = meta.tracks?.total || 0;
+    const total = meta.items?.total || 0;
     if (!total) return res.status(404).json({ error: 'Playlist ist leer — Spotify-Antwort: ' + JSON.stringify(meta) });
 
     for (let attempt = 0; attempt < 5; attempt++) {
       const offset = Math.floor(Math.random() * total);
       const resp = await fetch(
-        'https://api.spotify.com/v1/playlists/' + playlistId + '/tracks?' + querystring.stringify({
+        'https://api.spotify.com/v1/playlists/' + playlistId + '/items?' + querystring.stringify({
           limit: 1, offset, market: 'DE',
-          fields: 'items(track(name,uri,id,artists,album,preview_url,duration_ms,is_local))',
+          fields: 'items(is_local,item(name,uri,id,artists,album,preview_url,duration_ms))',
         }),
         { headers: { 'Authorization': 'Bearer ' + token } }
       );
       const data = await resp.json();
-      const track = data.items?.[0]?.track;
-      if (track && !track.is_local && track.uri) {
+      const entry = data.items?.[0];
+      const track = entry?.item;
+      if (track && !entry.is_local && track.uri) {
         return res.json({ track: mapTrack(track) });
       }
     }

@@ -108,21 +108,6 @@
       margin-top: 2rem;
     }
 
-    /* Spotify player area */
-    #spotify-player-area {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      background: var(--surface);
-      border-top: 1px solid var(--border);
-      padding: .75rem 1.5rem;
-      z-index: 50;
-      display: none;
-    }
-    #spotify-player-area.active { display: flex; align-items: center; gap: 1rem; }
-    #spotify-cover { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; }
-    #spotify-now { flex: 1; }
-    #spotify-now .sp-title { font-weight: 600; font-size: .9rem; }
-    #spotify-now .sp-artist { color: var(--text-dim); font-size: .8rem; }
   </style>
 </head>
 <body>
@@ -174,12 +159,6 @@
       <div id="reveal-category"></div>
       <div id="reveal-song" class="card card-glow reveal" style="max-width:500px;width:100%"></div>
     </div>
-  </div>
-
-  <!-- Spotify player bar -->
-  <div id="spotify-player-area">
-    <img id="spotify-cover" src="" alt="">
-    <div id="spotify-now"><div class="sp-title"></div><div class="sp-artist"></div></div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
