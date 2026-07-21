@@ -238,6 +238,17 @@
     requestAnimationFrame(animate);
   }
 
+  // Smoothly morphs the result icon (e.g. the red "❓") into a new emoji
+  function morphResultIcon(newIcon) {
+    var iconEl = document.getElementById('result-icon');
+    if (iconEl.textContent === newIcon) return;
+    iconEl.classList.add('morphing');
+    setTimeout(function() {
+      iconEl.textContent = newIcon;
+      iconEl.classList.remove('morphing');
+    }, 350);
+  }
+
   function showResult(catIdx) {
     if (spinHandled) return;
     spinHandled = true;
@@ -391,6 +402,7 @@
         spinWheel(state.currentCategory.id);
         if (state.currentMysterySub) {
           setTimeout(function() {
+            morphResultIcon(state.currentMysterySub.icon);
             document.getElementById('result-sub').textContent = state.currentMysterySub.name;
           }, 5800);
         }
@@ -400,6 +412,8 @@
           var idx = categories.findIndex(function(c) { return c.id === state.currentCategory.id; });
           if (idx >= 0) showResult(idx);
           if (state.currentMysterySub) {
+            // Already resolved (e.g. after a page reload) — show final icon right away, no morph
+            document.getElementById('result-icon').textContent = state.currentMysterySub.icon;
             document.getElementById('result-sub').textContent = state.currentMysterySub.name;
           }
         }

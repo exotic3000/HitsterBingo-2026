@@ -69,8 +69,21 @@ function renderTimer(el, value) {
 function categoryBadgeHTML(cat, sub) {
   if (!cat) return '';
   const c = typeof cat === 'string' ? CAT_MAP[cat] : cat;
-  let label = (c.icon || '') + ' ' + (c.name || cat.name || '');
-  if (sub) label += ': ' + (sub.name || sub);
+  const isMystery = (cat.id || cat) === 'mystery';
+
+  let icon = c.icon || '';
+  let text = c.name || cat.name || '';
+  if (sub) {
+    if (isMystery && sub.icon) {
+      // Show the resolved sub-category instead of a redundant "❓ ?"
+      icon = sub.icon;
+      text = sub.name || sub;
+    } else {
+      text += ': ' + (sub.name || sub);
+    }
+  }
+
+  const label = icon + ' ' + text;
   const color = c.color || cat.color || 'var(--accent)';
   return '<span class="category-badge" style="background:' + color + '">' + label + '</span>';
 }
