@@ -38,11 +38,11 @@ const CATEGORIES = [
 ];
 
 const MYSTERY_SUBS = [
-  { id: 'band_or_solo', name: 'Band oder Solo?', weight: 25 },
-  { id: 'before_2000', name: 'Vor 2000?', weight: 25 },
-  { id: 'exact_year', name: 'Genaues Jahr', weight: 12.5 },
-  { id: 'year3', name: 'Jahr ±3', weight: 25 },
-  { id: 'year2', name: 'Jahr ±2', weight: 12.5 },
+  { id: 'band_or_solo', name: 'Band oder Solo?', icon: '🎸', weight: 25 },
+  { id: 'before_2000', name: 'Vor 2000?', icon: '📼', weight: 25 },
+  { id: 'exact_year', name: 'Genaues Jahr', icon: '📌', weight: 12.5 },
+  { id: 'year3', name: 'Jahr ±3', icon: '🔢', weight: 25 },
+  { id: 'year2', name: 'Jahr ±2', icon: '🔍', weight: 12.5 },
 ];
 
 const MAX_TEAMS = 7;
