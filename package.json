@@ -6,7 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^5.1.0",
+    "express": "^5.2.1",
     "socket.io": "^4.8.0",
     "uuid": "^11.1.0"
   }
