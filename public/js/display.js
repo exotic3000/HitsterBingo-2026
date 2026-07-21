@@ -275,6 +275,21 @@
     setTimeout(function() { if (!isSpinning) startIdleFloat(); }, 2000);
   }
 
+  // Keeps the result display under the wheel in sync with the server's
+  // actual current category. Needed whenever we're not mid-spin (e.g. right
+  // after a reconnect during "playing"/"revealing") so it never keeps
+  // showing a category from a previous round.
+  function syncWheelResult(state) {
+    if (isSpinning || !state.currentCategory || !categories.length) return;
+    var idx = categories.findIndex(function(c) { return c.id === state.currentCategory.id; });
+    if (idx < 0) return;
+    showResult(idx);
+    if (state.currentMysterySub) {
+      document.getElementById('result-icon').textContent = state.currentMysterySub.icon;
+      document.getElementById('result-sub').textContent = state.currentMysterySub.name;
+    }
+  }
+
   // ── Spotify Web Playback SDK ───────────────────────────────────
 
   var spotifyPlayer = null;
@@ -408,15 +423,7 @@
         }
       } else if (!isSpinning && categories.length) {
         drawWheel(wheelAngle, null);
-        if (state.currentCategory) {
-          var idx = categories.findIndex(function(c) { return c.id === state.currentCategory.id; });
-          if (idx >= 0) showResult(idx);
-          if (state.currentMysterySub) {
-            // Already resolved (e.g. after a page reload) — show final icon right away, no morph
-            document.getElementById('result-icon').textContent = state.currentMysterySub.icon;
-            document.getElementById('result-sub').textContent = state.currentMysterySub.name;
-          }
-        }
+        syncWheelResult(state);
         startIdleFloat();
       }
     }
@@ -429,10 +436,8 @@
         categoryBadgeHTML(state.currentCategory, state.currentMysterySub);
       renderTeamDots(teams, state.answers);
 
-      // Keep wheel visible with last result
-      if (categories.length && !isSpinning) {
-        drawWheel(wheelAngle, null);
-      }
+      // Keep wheel visible with last result (and correct it after a reconnect)
+      syncWheelResult(state);
     }
 
     if (gs === 'revealing') {
@@ -442,6 +447,7 @@
       document.getElementById('reveal-category').innerHTML =
         categoryBadgeHTML(state.currentCategory, state.currentMysterySub);
       renderSolution(state.currentSong);
+      syncWheelResult(state);
     }
   });
 
