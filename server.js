@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const querystring = require('querystring');
 
@@ -26,6 +27,35 @@ const SPOTIFY_PLAYLIST = 'https://open.spotify.com/playlist/4QsXN56c7y8hH0v6EEnH
 let spotifyAccessToken = null;
 let spotifyRefreshToken = null;
 let spotifyTokenExpiry = 0;
+
+// Persist tokens to disk so a server restart doesn't force re-login.
+const SPOTIFY_TOKEN_FILE = path.join(__dirname, '.spotify-token.json');
+
+function saveSpotifyTokens() {
+  try {
+    fs.writeFileSync(SPOTIFY_TOKEN_FILE, JSON.stringify({
+      accessToken: spotifyAccessToken,
+      refreshToken: spotifyRefreshToken,
+      expiry: spotifyTokenExpiry,
+    }));
+  } catch (e) {
+    console.error('Spotify-Token konnte nicht gespeichert werden:', e.message);
+  }
+}
+
+function loadSpotifyTokens() {
+  try {
+    const data = JSON.parse(fs.readFileSync(SPOTIFY_TOKEN_FILE, 'utf8'));
+    spotifyAccessToken = data.accessToken || null;
+    spotifyRefreshToken = data.refreshToken || null;
+    spotifyTokenExpiry = data.expiry || 0;
+    if (spotifyRefreshToken) console.log('  Spotify-Login aus .spotify-token.json wiederhergestellt');
+  } catch (e) {
+    // Keine gespeicherten Tokens vorhanden — normal beim ersten Start.
+  }
+}
+
+loadSpotifyTokens();
 
 // ── Game Constants ──────────────────────────────────────────────
 
@@ -219,6 +249,7 @@ app.get('/auth/spotify/callback', async (req, res) => {
     spotifyAccessToken = data.access_token;
     spotifyRefreshToken = data.refresh_token;
     spotifyTokenExpiry = Date.now() + data.expires_in * 1000;
+    saveSpotifyTokens();
 
     broadcast();
     res.send('<html><body style="background:#0a0e27;color:#4cc9f0;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;font-size:1.5rem"><div style="text-align:center">✅ Spotify verbunden!<br><br><small style="color:#8892b0">Du kannst dieses Fenster schließen.</small></div></body></html>');
@@ -246,6 +277,7 @@ async function refreshSpotifyToken() {
       spotifyAccessToken = data.access_token;
       spotifyTokenExpiry = Date.now() + data.expires_in * 1000;
       if (data.refresh_token) spotifyRefreshToken = data.refresh_token;
+      saveSpotifyTokens();
       return true;
     }
   } catch (e) {

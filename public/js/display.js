@@ -1,6 +1,24 @@
 /* Beamer / Display View — wheel always visible */
 
 (function () {
+  // ── Title / Splash Screen ────────────────────────────────────
+
+  (function initSplash() {
+    var splash = document.getElementById('splash-screen');
+    if (!splash) return;
+
+    var dismissed = false;
+    function dismiss() {
+      if (dismissed) return;
+      dismissed = true;
+      splash.classList.add('leaving');
+      setTimeout(function () { splash.classList.add('hidden'); }, 900);
+    }
+
+    window.addEventListener('keydown', dismiss, { once: true });
+    splash.addEventListener('click', dismiss, { once: true });
+  })();
+
   const socket = connectSocket();
   socket.emit('join', { role: 'display' });
 

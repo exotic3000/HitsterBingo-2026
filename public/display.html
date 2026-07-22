@@ -114,9 +114,189 @@
       margin-top: 2rem;
     }
 
+    /* ── Title Screen ─────────────────────────────────────────── */
+    .splash-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      cursor: pointer;
+      background: radial-gradient(ellipse at 50% 25%, #221657 0%, #0a0e27 55%, #05061a 100%);
+    }
+    .splash-screen.hidden { display: none; }
+    .splash-screen.leaving { animation: splashWarpOut .9s cubic-bezier(.6,0,1,1) forwards; }
+    @keyframes splashWarpOut {
+      0%   { opacity: 1; transform: scale(1);   filter: blur(0); }
+      55%  { opacity: 1; transform: scale(1.5); filter: blur(3px); }
+      100% { opacity: 0; transform: scale(2.6); filter: blur(16px); }
+    }
+
+    .splash-spotlights { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+    .spotlight {
+      position: absolute;
+      top: -15%;
+      left: 50%;
+      width: 60vmax;
+      height: 170vmax;
+      transform-origin: top center;
+      clip-path: polygon(48% 0, 52% 0, 100% 100%, 0% 100%);
+      mix-blend-mode: screen;
+      animation: spotlightSwing 7s ease-in-out infinite;
+    }
+    .spotlight-1 { margin-left: -55vmax; background: linear-gradient(to bottom, rgba(76,201,240,.28), transparent 70%); animation-delay: -1.4s; }
+    .spotlight-2 { margin-left: -30vmax; background: linear-gradient(to bottom, rgba(247,37,133,.24), transparent 70%); animation-delay: -3.2s; }
+    .spotlight-3 { margin-left: -5vmax;  background: linear-gradient(to bottom, rgba(255,214,10,.2), transparent 70%);  animation-delay: -5s; }
+    @keyframes spotlightSwing {
+      0%, 100% { rotate: -32deg; }
+      50%      { rotate: 32deg; }
+    }
+
+    .splash-planet-wrap {
+      position: absolute;
+      top: 14%;
+      right: 10%;
+      width: 130px;
+      height: 130px;
+      z-index: 1;
+      animation: splashFloat 6s ease-in-out infinite;
+    }
+    .splash-planet {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #c08cff, #7c3aed 55%, #1a0e3d 100%);
+      box-shadow: 0 0 60px rgba(124,58,237,.6), inset -18px -10px 35px rgba(0,0,0,.5);
+    }
+    .splash-planet::after {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 210px; height: 46px;
+      border: 3px solid rgba(255,214,10,.65);
+      border-radius: 50%;
+      transform: translate(-50%,-50%) rotate(-18deg);
+      box-shadow: 0 0 20px rgba(255,214,10,.4);
+    }
+    @keyframes splashFloat {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-18px); }
+    }
+
+    .splash-moon {
+      position: absolute;
+      bottom: 10%;
+      left: 8%;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      z-index: 1;
+      background: radial-gradient(circle at 35% 30%, #e0e6ff, #4cc9f0 60%, #0a0e27 100%);
+      box-shadow: 0 0 40px rgba(76,201,240,.5);
+      animation: splashFloat 5s ease-in-out infinite reverse;
+    }
+
+    .splash-rocket {
+      position: absolute;
+      top: 68%;
+      left: -8%;
+      font-size: 2.4rem;
+      z-index: 1;
+      filter: drop-shadow(0 0 12px rgba(255,214,10,.7));
+      animation: rocketFly 8s linear infinite;
+    }
+    @keyframes rocketFly {
+      0%   { transform: translate(0, 0) rotate(35deg); opacity: 0; }
+      6%   { opacity: 1; }
+      92%  { opacity: 1; }
+      100% { transform: translate(125vw, -65vh) rotate(35deg); opacity: 0; }
+    }
+
+    .splash-content {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 0 1.5rem;
+    }
+    .splash-emoji {
+      font-size: 3rem;
+      margin-bottom: .5rem;
+      animation: splashFloat 4s ease-in-out infinite;
+      filter: drop-shadow(0 0 20px rgba(124,58,237,.6));
+    }
+    .splash-title {
+      font-family: var(--font-display);
+      font-size: clamp(2.6rem, 8.5vw, 6.5rem);
+      font-weight: 900;
+      letter-spacing: .04em;
+      background: linear-gradient(135deg, var(--cyan), var(--accent-glow), var(--pink), var(--gold));
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      opacity: 0;
+      transform: scale(.6);
+      animation: titleIn .7s cubic-bezier(.2,1.4,.4,1) forwards,
+                 titleGradient 6s ease infinite .7s,
+                 titleGlowPulse 2.4s ease-in-out infinite .7s;
+    }
+    @keyframes titleIn { to { opacity: 1; transform: scale(1); } }
+    @keyframes titleGradient { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+    @keyframes titleGlowPulse {
+      0%,100% { filter: drop-shadow(0 0 35px rgba(124,58,237,.5)); }
+      50%     { filter: drop-shadow(0 0 65px rgba(255,214,10,.6)); }
+    }
+    .splash-subtitle {
+      font-family: var(--font-display);
+      font-size: clamp(.9rem, 2vw, 1.3rem);
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      color: var(--text);
+      margin-top: 1rem;
+      opacity: 0;
+      animation: fadeUp .8s ease-out .9s forwards;
+    }
+    .splash-sub2 {
+      font-family: var(--font-body);
+      font-size: .95rem;
+      color: var(--gold);
+      margin-top: .5rem;
+      opacity: 0;
+      animation: fadeUp .8s ease-out 1.1s forwards;
+    }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 768px) {
+      .splash-planet-wrap { width: 80px; height: 80px; top: 8%; right: 6%; }
+      .splash-planet::after { width: 130px; height: 28px; }
+      .splash-moon { width: 40px; height: 40px; }
+    }
   </style>
 </head>
 <body>
+  <div id="splash-screen" class="splash-screen">
+    <div class="splash-spotlights">
+      <div class="spotlight spotlight-1"></div>
+      <div class="spotlight spotlight-2"></div>
+      <div class="spotlight spotlight-3"></div>
+    </div>
+    <div class="splash-planet-wrap"><div class="splash-planet"></div></div>
+    <div class="splash-moon"></div>
+    <div class="splash-rocket">🚀</div>
+    <div class="splash-content">
+      <div class="splash-emoji">🛸</div>
+      <h1 class="splash-title">HITSTER BINGO</h1>
+      <p class="splash-subtitle">Die Musik-Gameshow vom anderen Stern</p>
+      <p class="splash-sub2">✨ Teenscamp Edition ✨</p>
+    </div>
+  </div>
   <canvas id="particles-canvas"></canvas>
   <div class="page" style="position:relative;z-index:1">
     <div id="conn" class="conn off"></div>
