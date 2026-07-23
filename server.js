@@ -172,31 +172,45 @@ function pickWeightedRandom(items) {
   return items[items.length - 1];
 }
 
-// Linear coefficients (a,b) for L[r][c] = (a*r + b*c + d) mod 5 that keep
-// every row, column AND both diagonals a permutation of all 5 categories
-// (a "Knut Vik" style Latin square). Picking randomly among these plus a
-// random offset d and a random category order gives a fresh, well-shuffled
-// layout each time while preserving the one-of-each guarantee.
-const LATIN_COEFFS = [
-  [1, 2], [1, 3], [2, 1], [2, 4],
-  [3, 1], [3, 4], [4, 2], [4, 3],
-];
+// Every card gets exactly BINGO_SIZE cells of each category (same even split
+// as the wheel's equal-sized segments), but unlike a Latin square the same
+// category may repeat within one row/column/diagonal. To keep any single
+// line from being trivially easy (e.g. 4x "Interpret" + 1x "?"), no line may
+// contain the same category more than MAX_PER_LINE times. Random shuffling
+// with rejection gives each team an independent, unpredictable layout.
+const MAX_PER_LINE = 3;
+
+function cardLinesRespectLimit(card) {
+  const lines = [];
+  for (let r = 0; r < BINGO_SIZE; r++) lines.push(card[r].map(cell => cell.categoryId));
+  for (let c = 0; c < BINGO_SIZE; c++) lines.push(card.map(row => row[c].categoryId));
+  lines.push(card.map((row, i) => row[i].categoryId));
+  lines.push(card.map((row, i) => row[BINGO_SIZE - 1 - i].categoryId));
+
+  return lines.every(line => {
+    const counts = {};
+    for (const id of line) counts[id] = (counts[id] || 0) + 1;
+    return Object.values(counts).every(n => n <= MAX_PER_LINE);
+  });
+}
 
 function generateBingoCard() {
-  const catOrder = shuffle(CATEGORIES).map(cat => cat.id);
-  const [a, b] = LATIN_COEFFS[Math.floor(Math.random() * LATIN_COEFFS.length)];
-  const d = Math.floor(Math.random() * BINGO_SIZE);
+  const cellsPerCategory = (BINGO_SIZE * BINGO_SIZE) / CATEGORIES.length;
+  const pool = [];
+  CATEGORIES.forEach(cat => {
+    for (let i = 0; i < cellsPerCategory; i++) pool.push(cat.id);
+  });
 
-  const card = [];
-  for (let r = 0; r < BINGO_SIZE; r++) {
-    const row = [];
-    for (let c = 0; c < BINGO_SIZE; c++) {
-      const idx = (a * r + b * c + d) % BINGO_SIZE;
-      row.push({ categoryId: catOrder[idx], checked: false });
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const shuffled = shuffle(pool);
+    const card = [];
+    for (let r = 0; r < BINGO_SIZE; r++) {
+      card.push(shuffled.slice(r * BINGO_SIZE, (r + 1) * BINGO_SIZE)
+        .map(categoryId => ({ categoryId, checked: false })));
     }
-    card.push(row);
+    if (cardLinesRespectLimit(card)) return card;
   }
-  return card;
+  throw new Error('Konnte keine gültige Bingo-Karte generieren');
 }
 
 function checkBingo(card) {
