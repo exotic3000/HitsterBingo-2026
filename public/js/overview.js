@@ -19,10 +19,9 @@
       timerEl.classList.add('hidden');
     }
 
-    // Category
+    // Round
     if (state.currentCategory && gs !== 'lobby') {
       show('sec-category');
-      document.getElementById('ov-category').innerHTML = categoryBadgeHTML(state.currentCategory, state.currentMysterySub);
       document.getElementById('ov-round').textContent = 'Runde ' + (state.currentRound + 1);
     } else {
       hide('sec-category');
