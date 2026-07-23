@@ -2,6 +2,7 @@
 
 (function () {
   const socket = connectSocket();
+  const STORAGE_KEY = 'hitsterbingo_team_id';
 
   let myTeamId = null;
   let selectedEmoji = '🚀';
@@ -33,17 +34,49 @@
   });
   joinBtn.addEventListener('click', doJoin);
 
+  // Ask the server for a team id, reusing a previous one if we have it so a
+  // dropped connection or page reload doesn't wipe the team's bingo card.
+  function requestTeamId(existingId, onAssigned) {
+    socket.emit('join', { role: 'team', teamId: existingId || undefined });
+    socket.once('team_assigned', (id) => {
+      myTeamId = id;
+      localStorage.setItem(STORAGE_KEY, id);
+      onAssigned(id);
+    });
+  }
+
   function doJoin() {
     const name = nameInput.value.trim();
     if (!name) return;
-    socket.emit('join', { role: 'team' });
-    socket.once('team_assigned', (id) => {
-      myTeamId = id;
+    if (myTeamId) {
+      // Session already resumed/joined for this connection — just (re)name it.
+      socket.emit('update_team', { teamId: myTeamId, name: name, emoji: selectedEmoji });
+      hide('sec-setup');
+      show('sec-game');
+      return;
+    }
+    requestTeamId(localStorage.getItem(STORAGE_KEY), (id) => {
       socket.emit('update_team', { teamId: id, name: name, emoji: selectedEmoji });
       hide('sec-setup');
       show('sec-game');
     });
   }
+
+  // On every connect (initial load, or an automatic reconnect after a
+  // dropped connection), silently try to resume a known team id instead of
+  // waiting for the user to re-enter their name.
+  socket.on('connect', () => {
+    const idToResume = myTeamId || localStorage.getItem(STORAGE_KEY);
+    if (!idToResume) return;
+    requestTeamId(idToResume, (id) => {
+      if (id === idToResume) {
+        hide('sec-setup');
+        show('sec-game');
+      }
+      // else: server no longer knows this id (e.g. it restarted) — the
+      // setup screen stays visible so the team can (re)join normally.
+    });
+  });
 
   // Submit answer
   const answerInput = document.getElementById('input-answer');
