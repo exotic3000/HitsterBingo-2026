@@ -118,6 +118,21 @@ h1, h2, h3, h4 {
 .btn-danger { background: linear-gradient(135deg, var(--pink), #dc2626); color: #fff; }
 .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 
+.btn-kick {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: 1px solid var(--pink);
+  background: rgba(255,77,109,.15);
+  color: var(--pink);
+  border-radius: 8px;
+  font-size: .8rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.btn-kick:hover { background: var(--pink); color: #fff; }
+
 /* Input */
 .input {
   font-family: var(--font-body);
@@ -172,6 +187,12 @@ h1, h2, h3, h4 {
   border: 2px solid transparent;
   position: relative;
   user-select: none;
+  overflow: hidden;
+  padding: 2px;
+  text-align: center;
+  line-height: 1.1;
+  word-break: break-word;
+  hyphens: auto;
 }
 .bingo-grid.small .bingo-cell { font-size: .55rem; border-width: 1px; }
 .bingo-cell.checked::after {
@@ -346,6 +367,12 @@ h1, h2, h3, h4 {
   .page-title { font-size: 1.3rem; }
   .timer { font-size: 2rem; }
   .wheel-wrap { width: 280px; height: 280px; }
-  .bingo-grid { max-width: 300px; }
+  .bingo-grid { max-width: 300px; gap: 3px; }
+  .bingo-cell { font-size: .58rem; }
   .home-grid { grid-template-columns: 1fr 1fr; gap: 1rem; }
+}
+
+@media(max-width:360px) {
+  .bingo-grid { max-width: 260px; }
+  .bingo-cell { font-size: .5rem; }
 }

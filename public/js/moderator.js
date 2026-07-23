@@ -245,7 +245,10 @@
             '<span style="font-size:1.25rem">' + t.emoji + '</span>' +
             '<span style="font-weight:600">' + t.name + '</span>' +
           '</div>' +
-          '<span style="color:var(--text-dim);font-size:.8rem">' + t.score + ' Punkte</span>' +
+          '<div class="flex items-center gap-sm">' +
+            '<span style="color:var(--text-dim);font-size:.8rem">' + t.score + ' Punkte</span>' +
+            '<button class="btn-kick" data-team="' + t.id + '" data-name="' + t.name + '" title="Team entfernen">✕</button>' +
+          '</div>' +
         '</div>' +
         '<div id="bingo-mod-' + t.id + '" class="bingo-grid small"></div>' +
         (t.hasBingo ? '<p style="text-align:center;color:var(--gold);font-family:var(--font-display);margin-top:.5rem;font-weight:700">BINGO!</p>' : '') +
@@ -261,6 +264,14 @@
           onCellClick: (row, col) => socket.emit('mark_correct', { teamId: t.id, row, col }),
         });
       }
+    });
+
+    document.querySelectorAll('.btn-kick').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (confirm('Team "' + btn.dataset.name + '" wirklich aus dem Spiel entfernen?')) {
+          socket.emit('kick_team', { teamId: btn.dataset.team });
+        }
+      });
     });
   });
 

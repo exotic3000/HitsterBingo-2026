@@ -5,14 +5,60 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const querystring = require('querystring');
+const QRCode = require('qrcode');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static(path.join(__dirname, 'public')));
+// Cloudflare rewrites the browser-facing Cache-Control for static assets to
+// its own ~4h default regardless of what the origin sends, so a plain
+// no-cache header alone isn't enough — phones kept showing stale CSS/JS
+// after a fix went live. Instead, every HTML page gets its /css and /js
+// references stamped with a version query string that changes on every
+// server start, so each deploy is a brand new URL Cloudflare has never
+// cached, sidestepping the edge cache entirely.
+const ASSET_VERSION = Date.now();
+
+app.use((req, res, next) => {
+  const reqPath = req.path === '/' ? '/index.html' : req.path;
+  if (!reqPath.endsWith('.html')) return next();
+  const filePath = path.join(__dirname, 'public', reqPath);
+  fs.readFile(filePath, 'utf8', (err, html) => {
+    if (err) return next();
+    const versioned = html.replace(
+      /(href|src)="(\/(?:css|js)\/[^"?]+)"/g,
+      (m, attr, url) => attr + '="' + url + '?v=' + ASSET_VERSION + '"'
+    );
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', 'no-cache');
+    res.send(versioned);
+  });
+});
+
+// no-cache (not no-store): browsers/Cloudflare still keep a copy but must
+// revalidate via ETag on every load, so edits go live immediately instead of
+// being stuck behind Cloudflare's ~4h default browser cache TTL.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 app.use(express.json());
 console.log('[3] Middleware OK, weiter zu Routes...');
+
+// ── Join QR code ────────────────────────────────────────────────
+// Fixed public URL (Cloudflare Tunnel) teams scan to join from their phones.
+const JOIN_URL = 'https://bingo.hitsterquizshow.de/team.html';
+
+app.get('/api/join-qr', async (req, res) => {
+  try {
+    const png = await QRCode.toBuffer(JOIN_URL, { width: 400, margin: 1 });
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'no-store');
+    res.send(png);
+  } catch (err) {
+    res.status(500).json({ error: 'QR generation failed' });
+  }
+});
 
 // ── Spotify Config ──────────────────────────────────────────────
 
@@ -508,6 +554,15 @@ io.on('connection', (socket) => {
     cell.checked = !cell.checked;
     team.score = team.bingoCard.flat().filter(c => c.checked).length;
     team.hasBingo = checkBingo(team.bingoCard);
+    broadcast();
+  });
+
+  socket.on('kick_team', (data) => {
+    const teamId = data.teamId;
+    if (!teams.has(teamId)) return;
+    teams.delete(teamId);
+    answers.delete(teamId);
+    io.to('team_' + teamId).emit('kicked');
     broadcast();
   });
 

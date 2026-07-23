@@ -165,6 +165,17 @@
     else hide('sec-bingo');
   });
 
+  socket.on('kicked', () => {
+    localStorage.removeItem(STORAGE_KEY);
+    myTeamId = null;
+    submitted = false;
+    hide('sec-game');
+    show('sec-setup');
+    document.getElementById('kicked-notice').classList.remove('hidden');
+    nameInput.value = '';
+    joinBtn.disabled = true;
+  });
+
   socket.on('timer_tick', (val) => {
     const timerEl = document.getElementById('timer');
     if (!timerEl.classList.contains('hidden')) renderTimer(timerEl, val);
