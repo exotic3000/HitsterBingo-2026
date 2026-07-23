@@ -320,6 +320,8 @@ h1, h2, h3, h4 {
   justify-content: center;
 }
 .emoji-btn:hover, .emoji-btn.selected { border-color: var(--accent-glow); background: var(--surface-light); transform: scale(1.1); }
+.emoji-btn.taken { opacity: .3; cursor: not-allowed; filter: grayscale(1); }
+.emoji-btn.taken:hover { border-color: var(--border); background: var(--surface); transform: none; }
 
 /* Connection indicator */
 .conn {

@@ -7,16 +7,25 @@
     var splash = document.getElementById('splash-screen');
     if (!splash) return;
 
-    var dismissed = false;
-    function dismiss() {
-      if (dismissed) return;
-      dismissed = true;
+    var visible = true;
+    function hideSplash() {
+      if (!visible) return;
+      visible = false;
       splash.classList.add('leaving');
       setTimeout(function () { splash.classList.add('hidden'); }, 900);
     }
+    function showSplash() {
+      visible = true;
+      splash.classList.remove('leaving', 'hidden');
+    }
 
-    window.addEventListener('keydown', dismiss, { once: true });
-    splash.addEventListener('click', dismiss, { once: true });
+    // "T" (Titel) brings the splash back at any point during the show, e.g.
+    // for a break — any other key or a click dismisses it again.
+    window.addEventListener('keydown', function (e) {
+      if (e.key === 'T' || e.key === 't') { showSplash(); return; }
+      hideSplash();
+    });
+    splash.addEventListener('click', hideSplash);
   })();
 
   const socket = connectSocket();
@@ -264,7 +273,7 @@
     setTimeout(function() {
       iconEl.textContent = newIcon;
       iconEl.classList.remove('morphing');
-    }, 350);
+    }, 500);
   }
 
   function showResult(catIdx) {
@@ -434,10 +443,13 @@
         document.getElementById('wheel-ring').classList.remove('glowing');
         spinWheel(state.currentCategory.id);
         if (state.currentMysterySub) {
+          // Hold on the plain "❓ Mystery" a beat before revealing the sub-
+          // category, so the reveal itself is clearly noticeable instead of
+          // happening almost immediately after the wheel stops.
           setTimeout(function() {
             morphResultIcon(state.currentMysterySub.icon);
             document.getElementById('result-sub').textContent = state.currentMysterySub.name;
-          }, 5800);
+          }, 7500);
         }
       } else if (!isSpinning && categories.length) {
         drawWheel(wheelAngle, null);

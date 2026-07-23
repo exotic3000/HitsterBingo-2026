@@ -45,13 +45,25 @@ app.use(express.static(path.join(__dirname, 'public'), {
 app.use(express.json());
 console.log('[3] Middleware OK, weiter zu Routes...');
 
-// ── Join QR code ────────────────────────────────────────────────
-// Fixed public URL (Cloudflare Tunnel) teams scan to join from their phones.
+// ── Join QR codes ───────────────────────────────────────────────
+// Fixed public URLs (Cloudflare Tunnel) scanned from phones.
 const JOIN_URL = 'https://bingo.hitsterquizshow.de/team.html';
+const TEAMER_URL = 'https://bingo.hitsterquizshow.de/teamer.html';
 
 app.get('/api/join-qr', async (req, res) => {
   try {
     const png = await QRCode.toBuffer(JOIN_URL, { width: 400, margin: 1 });
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'no-store');
+    res.send(png);
+  } catch (err) {
+    res.status(500).json({ error: 'QR generation failed' });
+  }
+});
+
+app.get('/api/teamer-qr', async (req, res) => {
+  try {
+    const png = await QRCode.toBuffer(TEAMER_URL, { width: 400, margin: 1 });
     res.set('Content-Type', 'image/png');
     res.set('Cache-Control', 'no-store');
     res.send(png);
@@ -68,7 +80,7 @@ const PORT = process.env.PORT || 3000;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:' + PORT + '/auth/spotify/callback';
 
 // Playlists
-const SPOTIFY_PLAYLIST = 'https://open.spotify.com/playlist/4QsXN56c7y8hH0v6EEnHRa?si=b107b7adf82f49a2';
+const SPOTIFY_PLAYLIST = 'https://open.spotify.com/playlist/5CF56knZKCMgpfOBz5r0S4?si=CKn55_V1SfGL6anks2hqVg&utm_source=whatsapp&pt=9764aed2b277e286ce2d298fa80145e1';
 
 let spotifyAccessToken = null;
 let spotifyRefreshToken = null;
@@ -124,11 +136,13 @@ const MYSTERY_SUBS = [
 const MAX_TEAMS = 7;
 const BINGO_SIZE = 5;
 const TIMER_SECONDS = 60;
+const TEAM_DISCONNECT_GRACE_MS = 2000;
 
 // ── Game State ──────────────────────────────────────────────────
 
 const teams = new Map();
 const answers = new Map();
+const pendingTeamRemoval = new Map(); // teamId -> Timeout, cancelled on reconnect
 let gameState = 'lobby';
 let currentRound = 0;
 let currentCategory = null;
@@ -476,42 +490,73 @@ app.put('/api/spotify/pause', async (req, res) => {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('join', (data) => {
+  // Send the current state right away, before any 'join' — lets a client
+  // still on the team setup screen see already-taken names/emojis live.
+  socket.emit('game_state', getFullState());
+
+  socket.on('join', (data, ack) => {
     const { role } = data;
+    const reply = (res) => { if (typeof ack === 'function') ack(res); };
+    let teamId;
 
     if (role === 'team') {
-      let teamId = data.teamId;
-      if (!teamId || !teams.has(teamId)) {
-        if (teams.size >= MAX_TEAMS) {
-          socket.emit('error_msg', 'Maximale Teamanzahl erreicht');
+      teamId = data.teamId;
+      const resuming = teamId && teams.has(teamId);
+
+      if (resuming) {
+        // Reconnected (reload/network hiccup) before the grace period
+        // expired — the team stays, cancel its scheduled removal.
+        const pending = pendingTeamRemoval.get(teamId);
+        if (pending) {
+          clearTimeout(pending);
+          pendingTeamRemoval.delete(teamId);
+        }
+      } else {
+        // Validate before the team exists so a rejected name/emoji never
+        // leaves a half-created team with a placeholder name behind.
+        const name = typeof data.name === 'string' ? data.name.trim() : '';
+        const emoji = data.emoji || '🚀';
+
+        if (!name) {
+          reply({ ok: false, message: 'Teamname fehlt.' });
           return;
         }
+        if (teams.size >= MAX_TEAMS) {
+          reply({ ok: false, message: 'Maximale Teamanzahl erreicht' });
+          return;
+        }
+        const nameTaken = [...teams.values()].some(
+          (t) => t.name.trim().toLowerCase() === name.toLowerCase()
+        );
+        if (nameTaken) {
+          reply({ ok: false, field: 'name', message: 'Dieser Teamname ist bereits vergeben.' });
+          return;
+        }
+        const emojiTaken = [...teams.values()].some((t) => t.emoji === emoji);
+        if (emojiTaken) {
+          reply({ ok: false, field: 'emoji', message: 'Dieses Emoji ist bereits vergeben.' });
+          return;
+        }
+
         teamId = uuidv4();
         teams.set(teamId, {
           id: teamId,
-          name: 'Team ' + (teams.size + 1),
-          emoji: '🚀',
+          name,
+          emoji,
           bingoCard: generateBingoCard(),
           score: 0,
           hasBingo: false,
         });
       }
+
       socket.join('team_' + teamId);
       socket.teamId = teamId;
-      socket.emit('team_assigned', teamId);
     }
 
     socket.join(role);
     socket.emit('game_state', getFullState());
     broadcast();
-  });
-
-  socket.on('update_team', (data) => {
-    const team = teams.get(data.teamId);
-    if (!team) return;
-    if (data.name) team.name = data.name;
-    if (data.emoji) team.emoji = data.emoji;
-    broadcast();
+    reply({ ok: true, teamId: role === 'team' ? teamId : undefined });
   });
 
   socket.on('start_spin', () => {
@@ -560,6 +605,11 @@ io.on('connection', (socket) => {
   socket.on('kick_team', (data) => {
     const teamId = data.teamId;
     if (!teams.has(teamId)) return;
+    const pending = pendingTeamRemoval.get(teamId);
+    if (pending) {
+      clearTimeout(pending);
+      pendingTeamRemoval.delete(teamId);
+    }
     teams.delete(teamId);
     answers.delete(teamId);
     io.to('team_' + teamId).emit('kicked');
@@ -595,6 +645,21 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
+
+    const teamId = socket.teamId;
+    if (!teamId) return;
+
+    // Don't remove immediately — a page reload or brief network drop also
+    // fires 'disconnect' and would otherwise wipe a still-playing team.
+    // The 'join' resume path cancels this if the same team reconnects.
+    const timer = setTimeout(() => {
+      pendingTeamRemoval.delete(teamId);
+      if (!teams.has(teamId)) return;
+      teams.delete(teamId);
+      answers.delete(teamId);
+      broadcast();
+    }, TEAM_DISCONNECT_GRACE_MS);
+    pendingTeamRemoval.set(teamId, timer);
   });
 });
 
