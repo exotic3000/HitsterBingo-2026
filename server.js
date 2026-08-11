@@ -136,7 +136,7 @@ const MYSTERY_SUBS = [
 const MAX_TEAMS = 10 ;
 const BINGO_SIZE = 5;
 const TIMER_SECONDS = 60;
-const TEAM_DISCONNECT_GRACE_MS = 45000;
+const TEAM_DISCONNECT_GRACE_MS = 450000;
 
 // ── Game State ──────────────────────────────────────────────────
 
