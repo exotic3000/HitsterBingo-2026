@@ -133,6 +133,7 @@ const MYSTERY_SUBS = [
   { id: 'year2', name: 'Jahr ±2', icon: '🔍', weight: 12.5 },
 ];
 
+// –– sehr wichtige Konstanten ––––––––––––––––––––––––––––––––––––
 const MAX_TEAMS = 10 ;
 const BINGO_SIZE = 5;
 const TIMER_SECONDS = 60;
