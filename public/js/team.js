@@ -153,6 +153,15 @@
     document.getElementById('answer-echo').textContent = '„' + val + '"';
   }
 
+  // Own bingo card is clickable everywhere — teams self-mark a cell correct
+  // once they've checked their answer against the revealed solution. This
+  // used to be a separate "Teamer" device's job; folding it in here means a
+  // team only needs one phone.
+  const cardOptions = {
+    clickable: true,
+    onCellClick: (row, col) => socket.emit('mark_correct', { teamId: myTeamId, row, col }),
+  };
+
   // Game state
   socket.on('game_state', (state) => {
     lastState = state;
@@ -188,12 +197,12 @@
 
     if (gs === 'lobby' || gs === 'between_rounds') {
       show('sec-waiting');
-      renderBingoCard(document.getElementById('bingo-waiting'), team.bingoCard);
+      renderBingoCard(document.getElementById('bingo-waiting'), team.bingoCard, cardOptions);
     }
 
     if (gs === 'spinning') {
       show('sec-waiting');
-      renderBingoCard(document.getElementById('bingo-waiting'), team.bingoCard);
+      renderBingoCard(document.getElementById('bingo-waiting'), team.bingoCard, cardOptions);
     }
 
     if (gs === 'playing') {
@@ -201,7 +210,7 @@
       timerEl.classList.remove('hidden');
       renderTimer(timerEl, state.timerValue);
       document.getElementById('answer-category').innerHTML = categoryBadgeHTML(state.currentCategory, state.currentMysterySub);
-      renderBingoCard(document.getElementById('bingo-play'), team.bingoCard);
+      renderBingoCard(document.getElementById('bingo-play'), team.bingoCard, cardOptions);
 
       if (submitted) {
         hide('answer-form');
@@ -223,7 +232,7 @@
             (state.currentSong.year ? '<p class="song-meta">' + state.currentSong.year + '</p>' : '') +
           '</div>';
       }
-      renderBingoCard(document.getElementById('bingo-reveal'), team.bingoCard);
+      renderBingoCard(document.getElementById('bingo-reveal'), team.bingoCard, cardOptions);
     }
 
     // Bingo!

@@ -45,25 +45,13 @@ app.use(express.static(path.join(__dirname, 'public'), {
 app.use(express.json());
 console.log('[3] Middleware OK, weiter zu Routes...');
 
-// ── Join QR codes ───────────────────────────────────────────────
-// Fixed public URLs (Cloudflare Tunnel) scanned from phones.
+// ── Join QR code ────────────────────────────────────────────────
+// Fixed public URL (Cloudflare Tunnel) scanned from phones.
 const JOIN_URL = 'https://bingo.hitsterquizshow.de/team.html';
-const TEAMER_URL = 'https://bingo.hitsterquizshow.de/teamer.html';
 
 app.get('/api/join-qr', async (req, res) => {
   try {
     const png = await QRCode.toBuffer(JOIN_URL, { width: 400, margin: 1 });
-    res.set('Content-Type', 'image/png');
-    res.set('Cache-Control', 'no-store');
-    res.send(png);
-  } catch (err) {
-    res.status(500).json({ error: 'QR generation failed' });
-  }
-});
-
-app.get('/api/teamer-qr', async (req, res) => {
-  try {
-    const png = await QRCode.toBuffer(TEAMER_URL, { width: 400, margin: 1 });
     res.set('Content-Type', 'image/png');
     res.set('Cache-Control', 'no-store');
     res.send(png);
@@ -702,7 +690,6 @@ server.listen(PORT, () => {
   console.log('    Moderation:  http://localhost:' + PORT + '/moderator.html');
   console.log('    Team:        http://localhost:' + PORT + '/team.html');
   console.log('    Übersicht:   http://localhost:' + PORT + '/overview.html');
-  console.log('    Teamer:      http://localhost:' + PORT + '/teamer.html');
   console.log('    Bingokarten: http://localhost:' + PORT + '/boards.html');
   console.log('');
   if (SPOTIFY_CLIENT_ID) {
