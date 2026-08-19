@@ -22,10 +22,14 @@
     // "T" (Titel) brings the splash back at any point during the show, e.g.
     // for a break — any other key or a click dismisses it again.
     window.addEventListener('keydown', function (e) {
+      if (window.HBSound) HBSound.unlock();
       if (e.key === 'T' || e.key === 't') { showSplash(); return; }
       hideSplash();
     });
-    splash.addEventListener('click', hideSplash);
+    splash.addEventListener('click', function () {
+      if (window.HBSound) HBSound.unlock();
+      hideSplash();
+    });
   })();
 
   const socket = connectSocket();
@@ -251,6 +255,7 @@
         var py = rect.top;
         var col = categories[currentSegIdx % categories.length].color;
         spawnBurst(px, py, col, 3);
+        if (window.HBSound) HBSound.tick();
       }
 
       drawWheel(wheelAngle, null);
@@ -382,6 +387,54 @@
 
   initSpotifyPlayer();
 
+  // ── Bingo Celebration ────────────────────────────────────────────
+  // Full-screen overlay + fanfare + confetti when a team first hits Bingo.
+  // Queued so two near-simultaneous Bingos don't overlap on screen.
+
+  var seenBingoTeams = new Set();
+  var bingoInitialized = false;
+  var bingoQueue = [];
+  var bingoShowing = false;
+
+  function triggerBingoCelebration(team) {
+    bingoQueue.push(team);
+    processBingoQueue();
+  }
+
+  function processBingoQueue() {
+    if (bingoShowing || !bingoQueue.length) return;
+    var team = bingoQueue.shift();
+    bingoShowing = true;
+
+    var overlay = document.getElementById('bingo-celebration');
+    document.getElementById('bingo-celebration-emoji').textContent = team.emoji;
+    document.getElementById('bingo-celebration-team').textContent = team.name;
+    overlay.classList.add('visible');
+
+    if (window.HBSound) HBSound.bingo();
+
+    var w = window.innerWidth, h = window.innerHeight;
+    var colors = ['#ffd60a', '#ff4d6d', '#4cc9f0', '#06d6a0'];
+    for (var i = 0; i < 5; i++) {
+      (function(i) {
+        setTimeout(function() {
+          var x = w * (0.15 + Math.random() * 0.7);
+          var y = h * (0.15 + Math.random() * 0.5);
+          colors.forEach(function(col) { spawnBurst(x, y, col, 18); });
+        }, i * 250);
+      })(i);
+    }
+
+    function dismiss() {
+      overlay.classList.remove('visible');
+      overlay.removeEventListener('click', dismiss);
+      bingoShowing = false;
+      setTimeout(processBingoQueue, 400);
+    }
+    overlay.addEventListener('click', dismiss);
+    setTimeout(dismiss, 5000);
+  }
+
   // ── State Management ───────────────────────────────────────────
 
   var lastSpinState = null;
@@ -390,6 +443,34 @@
     categories = state.categories || [];
     var teams = Object.values(state.teams);
     var gs = state.gameState;
+
+    // Detect newly-earned Bingos. On the very first game_state (page
+    // load/reconnect) just record existing winners without celebrating —
+    // otherwise reloading the display mid-game replays every past Bingo.
+    if (!bingoInitialized) {
+      teams.forEach(function(t) { if (t.hasBingo) seenBingoTeams.add(t.id); });
+      bingoInitialized = true;
+    } else {
+      var anyBingoNow = false;
+      teams.forEach(function(t) {
+        if (t.hasBingo) {
+          anyBingoNow = true;
+          if (!seenBingoTeams.has(t.id)) {
+            seenBingoTeams.add(t.id);
+            triggerBingoCelebration(t);
+          }
+        } else {
+          seenBingoTeams.delete(t.id);
+        }
+      });
+      // A reset clears every team's Bingo — cut the overlay short instead
+      // of leaving it up for a game that already moved on.
+      if (!anyBingoNow && bingoShowing) {
+        document.getElementById('bingo-celebration').classList.remove('visible');
+        bingoShowing = false;
+        bingoQueue = [];
+      }
+    }
 
     // Timer
     var timerEl = document.getElementById('timer');
@@ -488,6 +569,7 @@
 
   socket.on('timer_tick', function(val) {
     renderTimer(document.getElementById('timer'), val);
+    if (window.HBSound && val > 0 && val <= 10) HBSound.timerBeep(val <= 3);
   });
 
   function renderTeamDots(teams, answers) {

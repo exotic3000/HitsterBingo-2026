@@ -116,6 +116,54 @@
       margin-top: 2rem;
     }
 
+    /* ── Bingo Celebration ────────────────────────────────────── */
+    .bingo-celebration {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 50% 50%, rgba(255,214,10,.18), rgba(10,14,39,.9) 65%);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .4s ease;
+    }
+    .bingo-celebration.visible { opacity: 1; pointer-events: auto; cursor: pointer; }
+    .bingo-celebration-content { text-align: center; animation: bingoPop .7s cubic-bezier(.2,1.6,.4,1); }
+    .bingo-celebration-emoji {
+      font-size: 5.5rem;
+      filter: drop-shadow(0 0 30px rgba(255,214,10,.7));
+      animation: bingoFloat 2.2s ease-in-out infinite;
+    }
+    .bingo-celebration-title {
+      font-family: var(--font-display);
+      font-size: clamp(3rem, 10vw, 7rem);
+      font-weight: 900;
+      letter-spacing: .06em;
+      background: linear-gradient(135deg, var(--gold), var(--pink), var(--cyan));
+      background-size: 200% 200%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: bingoGradient 2s ease infinite;
+      text-shadow: 0 0 60px rgba(255,214,10,.4);
+      margin: .25rem 0;
+    }
+    .bingo-celebration-team {
+      font-family: var(--font-display);
+      font-size: clamp(1.2rem, 3vw, 2rem);
+      color: var(--text);
+      letter-spacing: .1em;
+    }
+    @keyframes bingoPop {
+      0%   { transform: scale(.3) rotate(-8deg); opacity: 0; }
+      60%  { transform: scale(1.15) rotate(3deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0); opacity: 1; }
+    }
+    @keyframes bingoGradient { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+    @keyframes bingoFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+
 
     /* ── Title Screen ─────────────────────────────────────────── */
     .splash-screen {
@@ -301,6 +349,13 @@
     </div>
   </div>
   <canvas id="particles-canvas"></canvas>
+  <div id="bingo-celebration" class="bingo-celebration">
+    <div class="bingo-celebration-content">
+      <div class="bingo-celebration-emoji" id="bingo-celebration-emoji"></div>
+      <div class="bingo-celebration-title">BINGO!</div>
+      <div class="bingo-celebration-team" id="bingo-celebration-team"></div>
+    </div>
+  </div>
   <div class="page" style="position:relative;z-index:1">
     <div id="conn" class="conn off"></div>
 
@@ -352,6 +407,7 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/shared.js"></script>
+  <script src="/js/sound.js"></script>
   <script src="/js/display.js"></script>
 </body>
 </html>
