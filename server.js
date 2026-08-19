@@ -70,6 +70,7 @@ const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0
 // Playlists — Name + Spotify-URL/ID, wählbar in der Moderator-Ansicht.
 const SPOTIFY_PLAYLISTS = [
   { name: 'Teenscamp HitsterGameshow 2026', url: 'https://open.spotify.com/playlist/5CF56knZKCMgpfOBz5r0S4?si=CKn55_V1SfGL6anks2hqVg&utm_source=whatsapp&pt=9764aed2b277e286ce2d298fa80145e1' },
+  { name: 'Teenscamp Disse 2026', url : 'https://open.spotify.com/playlist/4RTxuCmYBccS5M6rhAWfMd?si=478a56b62e174378'}
 ];
 
 let spotifyAccessToken = null;
