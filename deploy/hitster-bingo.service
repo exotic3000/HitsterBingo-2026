@@ -10,7 +10,7 @@ WorkingDirectory=/home/Juri/HitsterBingo-2026
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=5
-Environment=PORT=3000
+Environment=PORT=3001
 Environment=SPOTIFY_REDIRECT_URI=https://bingo.hitsterquizshow.de/auth/spotify/callback
 
 [Install]
