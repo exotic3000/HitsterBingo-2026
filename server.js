@@ -21,7 +21,6 @@ const SITE_PASSWORD = process.env.SITE_PASSWORD || 'OutOfOrbit26';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const AUTH_COOKIE = 'hb_auth';
 const AUTH_TOKEN = crypto.createHmac('sha256', SESSION_SECRET).update('authenticated').digest('hex');
-const AUTH_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 const PROTECTED_PAGES = new Set([
   '/', '/index.html', '/display.html', '/moderator.html',
@@ -87,10 +86,13 @@ app.post('/login', (req, res) => {
   const { password } = req.body || {};
   if (password !== SITE_PASSWORD) return res.status(401).json({ ok: false });
 
+  // No Max-Age: a session cookie, cleared when the browser fully closes —
+  // reopening the browser asks for the password again, but a reload or new
+  // tab within the same session doesn't log the moderator out mid-game.
   const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
   res.setHeader('Set-Cookie',
     AUTH_COOKIE + '=' + AUTH_TOKEN
-    + '; HttpOnly; Path=/; Max-Age=' + Math.floor(AUTH_MAX_AGE_MS / 1000)
+    + '; HttpOnly; Path=/'
     + '; SameSite=Lax' + (isSecure ? '; Secure' : ''));
   res.json({ ok: true });
 });
