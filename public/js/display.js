@@ -293,8 +293,12 @@
     spawnBurst(cx, cy, '#ffd60a', 40);
 
     // Result text overlay
-    document.getElementById('result-icon').textContent = cat.icon;
-    document.getElementById('result-label').textContent = cat.name;
+    // The "❓" itself belongs on the wheel only — for mystery, keep the
+    // overlay icon blank (and the label as plain "Mystery") until the
+    // sub-category reveal fades the real icon in further down.
+    var isMystery = cat.id === 'mystery';
+    document.getElementById('result-icon').textContent = isMystery ? '' : cat.icon;
+    document.getElementById('result-label').textContent = isMystery ? 'Mystery' : cat.name;
     document.getElementById('result-label').style.color = cat.color;
     document.getElementById('result-overlay').classList.add('visible');
 
@@ -436,16 +440,17 @@
       lobbyInfo.classList.add('hidden');
       roundLabel.textContent = 'Runde ' + (state.currentRound + 1);
 
-      if (gs === 'spinning' && state.currentCategory && lastSpinState !== state.currentRound + '_spin') {
-        lastSpinState = state.currentRound + '_spin';
+      if (gs === 'spinning' && state.currentCategory && lastSpinState !== state.spinToken) {
+        lastSpinState = state.spinToken;
         document.getElementById('result-overlay').classList.remove('visible');
         document.getElementById('result-sub').textContent = '';
         document.getElementById('wheel-ring').classList.remove('glowing');
         spinWheel(state.currentCategory.id);
         if (state.currentMysterySub) {
-          // Hold on the plain "❓ Mystery" a beat before revealing the sub-
-          // category, so the reveal itself is clearly noticeable instead of
-          // happening almost immediately after the wheel stops.
+          // Hold on the plain "Mystery" label (no icon) a beat before
+          // revealing the sub-category, so the reveal itself is clearly
+          // noticeable instead of happening almost immediately after the
+          // wheel stops.
           setTimeout(function() {
             morphResultIcon(state.currentMysterySub.icon);
             document.getElementById('result-sub').textContent = state.currentMysterySub.name;

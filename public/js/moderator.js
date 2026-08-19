@@ -164,6 +164,17 @@
     if (gs === 'lobby' || gs === 'between_rounds') {
       controlsEl.appendChild(makeBtn('Drehen', 'btn-primary', () => socket.emit('start_spin')));
     }
+    if (gs === 'spinning' || gs === 'playing' || gs === 'revealing') {
+      controlsEl.appendChild(makeBtn('Kategorie neu drehen', 'btn-secondary', () => {
+        socket.emit('redraw_category');
+        document.getElementById('input-title').value = '';
+        document.getElementById('input-artist').value = '';
+        document.getElementById('input-year').value = '';
+        searchInput.value = '';
+        resultsEl.innerHTML = '';
+        selectedSong = null;
+      }));
+    }
     if (gs === 'playing') {
       controlsEl.appendChild(makeBtn('Lösung zeigen', 'btn-danger', () => socket.emit('reveal_solution')));
     }

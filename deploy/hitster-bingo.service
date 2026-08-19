@@ -1,0 +1,17 @@
+[Unit]
+Description=Hitster Bingo Gameshow Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=Juri
+WorkingDirectory=/home/Juri/HitsterBingo-2026
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+Environment=PORT=3000
+Environment=SPOTIFY_REDIRECT_URI=https://bingo.hitsterquizshow.de/auth/spotify/callback
+
+[Install]
+WantedBy=multi-user.target

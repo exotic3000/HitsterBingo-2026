@@ -134,6 +134,7 @@ const answers = new Map();
 const pendingTeamRemoval = new Map(); // teamId -> Timeout, cancelled on reconnect
 let gameState = 'lobby';
 let currentRound = 0;
+let spinToken = 0;
 let currentCategory = null;
 let currentMysterySub = null;
 let currentSong = null;
@@ -219,6 +220,7 @@ function getFullState() {
     gameState,
     teams: Object.fromEntries(teams),
     currentRound,
+    spinToken,
     currentCategory,
     currentMysterySub,
     currentSong,
@@ -564,6 +566,7 @@ io.on('connection', (socket) => {
 
   socket.on('start_spin', () => {
     gameState = 'spinning';
+    spinToken++;
     currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
     currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
     answers.clear();
@@ -616,6 +619,18 @@ io.on('connection', (socket) => {
     teams.delete(teamId);
     answers.delete(teamId);
     io.to('team_' + teamId).emit('kicked');
+    broadcast();
+  });
+
+  socket.on('redraw_category', () => {
+    clearTimer();
+    spinToken++;
+    currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+    currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
+    currentSong = null;
+    answers.clear();
+    gameState = 'spinning';
+    io.emit('spotify_pause');
     broadcast();
   });
 
