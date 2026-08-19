@@ -102,7 +102,7 @@
     })
     .catch(() => {});
 
-  randomBtn.addEventListener('click', async () => {
+  async function doRandomSong() {
     resultsEl.innerHTML = '<p style="color:var(--text-dim);padding:.5rem">Wähle zufälligen Song...</p>';
     try {
       const resp = await fetch('/api/spotify/playlist-random?playlist=' + playlistSelect.value);
@@ -115,11 +115,13 @@
     } catch (e) {
       resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">Fehler: ' + e.message + '</p>';
     }
-  });
+  }
+
+  randomBtn.addEventListener('click', doRandomSong);
 
   // ── Start song ─────────────────────────────────────────────────
 
-  document.getElementById('btn-start-song').addEventListener('click', () => {
+  function doStartSong() {
     const title = document.getElementById('input-title').value.trim();
     const artist = document.getElementById('input-artist').value.trim();
     const year = document.getElementById('input-year').value.trim();
@@ -132,7 +134,9 @@
     };
     socket.emit('set_song', songData);
     selectedSong = null;
-  });
+  }
+
+  document.getElementById('btn-start-song').addEventListener('click', doStartSong);
 
   // ── Toggle manual input ────────────────────────────────────────
 
@@ -191,7 +195,7 @@
       const manualFieldIds = ['input-title', 'input-artist', 'input-year'];
       if (e.key === 'Enter' && manualFieldIds.includes(target.id)) {
         e.preventDefault();
-        document.getElementById('btn-start-song').click();
+        doStartSong();
       }
       return;
     }
@@ -222,6 +226,14 @@
       case 'm':
       case 'M':
         if (currentGameState === 'spinning' && btnToggle && !btnToggle.classList.contains('hidden')) toggleManual();
+        break;
+      case 's':
+      case 'S':
+        if (currentGameState === 'spinning') doStartSong();
+        break;
+      case 'z':
+      case 'Z':
+        if (currentGameState === 'spinning' && spotifyConnected) doRandomSong();
         break;
       case 'r':
       case 'R':
