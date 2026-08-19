@@ -67,8 +67,10 @@ const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'b31d81165bba
 const PORT = process.env.PORT || 3000;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:' + PORT + '/auth/spotify/callback';
 
-// Playlists
-const SPOTIFY_PLAYLIST = 'https://open.spotify.com/playlist/5CF56knZKCMgpfOBz5r0S4?si=CKn55_V1SfGL6anks2hqVg&utm_source=whatsapp&pt=9764aed2b277e286ce2d298fa80145e1';
+// Playlists — Name + Spotify-URL/ID, wählbar in der Moderator-Ansicht.
+const SPOTIFY_PLAYLISTS = [
+  { name: 'Standard', url: 'https://open.spotify.com/playlist/5CF56knZKCMgpfOBz5r0S4?si=CKn55_V1SfGL6anks2hqVg&utm_source=whatsapp&pt=9764aed2b277e286ce2d298fa80145e1' },
+];
 
 let spotifyAccessToken = null;
 let spotifyRefreshToken = null;
@@ -409,12 +411,17 @@ app.get('/api/spotify/search', async (req, res) => {
   }
 });
 
+app.get('/api/spotify/playlists', (req, res) => {
+  res.json({ playlists: SPOTIFY_PLAYLISTS.map((p, index) => ({ index, name: p.name })) });
+});
+
 app.get('/api/spotify/playlist-random', async (req, res) => {
   const token = await getValidToken();
   if (!token) return res.status(401).json({ error: 'Nicht mit Spotify verbunden' });
 
-  const playlistId = extractPlaylistId(SPOTIFY_PLAYLIST);
-  if (!playlistId) return res.status(400).json({ error: 'Keine Playlist im Code hinterlegt (SPOTIFY_PLAYLIST in server.js)' });
+  const playlist = SPOTIFY_PLAYLISTS[parseInt(req.query.playlist)] || SPOTIFY_PLAYLISTS[0];
+  const playlistId = extractPlaylistId(playlist?.url);
+  if (!playlistId) return res.status(400).json({ error: 'Keine Playlist im Code hinterlegt (SPOTIFY_PLAYLISTS in server.js)' });
 
   try {
     const metaResp = await fetch(

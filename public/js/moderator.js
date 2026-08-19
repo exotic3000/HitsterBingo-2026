@@ -90,11 +90,21 @@
   // ── Random song from playlist ──────────────────────────────────
 
   const randomBtn = document.getElementById('btn-random-song');
+  const playlistSelect = document.getElementById('select-playlist');
+
+  fetch('/api/spotify/playlists')
+    .then((r) => r.json())
+    .then((data) => {
+      playlistSelect.innerHTML = (data.playlists || [])
+        .map((p) => '<option value="' + p.index + '">' + p.name + '</option>')
+        .join('');
+    })
+    .catch(() => {});
 
   randomBtn.addEventListener('click', async () => {
     resultsEl.innerHTML = '<p style="color:var(--text-dim);padding:.5rem">Wähle zufälligen Song...</p>';
     try {
-      const resp = await fetch('/api/spotify/playlist-random');
+      const resp = await fetch('/api/spotify/playlist-random?playlist=' + playlistSelect.value);
       const data = await resp.json();
       if (data.error) {
         resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">' + data.error + '</p>';
