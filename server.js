@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const querystring = require('querystring');
 const QRCode = require('qrcode');
@@ -10,6 +11,43 @@ const QRCode = require('qrcode');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+// ── Site password ───────────────────────────────────────────────
+// Gates every view except team.html (players need to join without a
+// password) and the assets/sockets/APIs every page depends on. Session
+// token is derived from a secret that's regenerated on each server start,
+// so a restart simply logs everyone out again — no persistence needed.
+const SITE_PASSWORD = process.env.SITE_PASSWORD || 'OutOfOrbit26';
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const AUTH_COOKIE = 'hb_auth';
+const AUTH_TOKEN = crypto.createHmac('sha256', SESSION_SECRET).update('authenticated').digest('hex');
+const AUTH_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+const PROTECTED_PAGES = new Set([
+  '/', '/index.html', '/display.html', '/moderator.html',
+  '/overview.html', '/boards.html', '/qr.html',
+]);
+
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const cookies = {};
+  if (!header) return cookies;
+  header.split(';').forEach((pair) => {
+    const idx = pair.indexOf('=');
+    if (idx === -1) return;
+    cookies[pair.slice(0, idx).trim()] = decodeURIComponent(pair.slice(idx + 1).trim());
+  });
+  return cookies;
+}
+
+function isAuthenticated(req) {
+  return parseCookies(req)[AUTH_COOKIE] === AUTH_TOKEN;
+}
+
+app.use((req, res, next) => {
+  if (!PROTECTED_PAGES.has(req.path) || isAuthenticated(req)) return next();
+  res.redirect('/login.html?redirect=' + encodeURIComponent(req.path));
+});
 
 // Cloudflare rewrites the browser-facing Cache-Control for static assets to
 // its own ~4h default regardless of what the origin sends, so a plain
@@ -44,6 +82,18 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 app.use(express.json());
 console.log('[3] Middleware OK, weiter zu Routes...');
+
+app.post('/login', (req, res) => {
+  const { password } = req.body || {};
+  if (password !== SITE_PASSWORD) return res.status(401).json({ ok: false });
+
+  const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie',
+    AUTH_COOKIE + '=' + AUTH_TOKEN
+    + '; HttpOnly; Path=/; Max-Age=' + Math.floor(AUTH_MAX_AGE_MS / 1000)
+    + '; SameSite=Lax' + (isSecure ? '; Secure' : ''));
+  res.json({ ok: true });
+});
 
 // ── Join QR code ────────────────────────────────────────────────
 // Fixed public URL (Cloudflare Tunnel) scanned from phones.

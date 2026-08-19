@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — Hitster Bingo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="page flex flex-col items-center justify-center" style="min-height:100vh">
+    <h1 class="page-title" style="font-size:2.5rem;margin-bottom:.5rem">Hitster Bingo</h1>
+    <p class="subtitle">Zugang geschützt</p>
+
+    <form id="login-form" class="card" style="width:100%;max-width:340px">
+      <div style="text-align:center;font-size:2rem;margin-bottom:1rem">🔒</div>
+      <input id="input-password" class="input" type="password" placeholder="Passwort" autocomplete="current-password" autofocus>
+      <p id="error" class="hidden" style="color:var(--pink);font-size:.8rem;margin-top:.6rem">Falsches Passwort.</p>
+      <button type="submit" class="btn btn-primary w-full mt">Betreten</button>
+    </form>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const redirect = params.get('redirect') || '/';
+    const form = document.getElementById('login-form');
+    const input = document.getElementById('input-password');
+    const error = document.getElementById('error');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.classList.add('hidden');
+      const resp = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: input.value }),
+      });
+      if (resp.ok) {
+        location.href = redirect;
+      } else {
+        error.classList.remove('hidden');
+        input.value = '';
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>
