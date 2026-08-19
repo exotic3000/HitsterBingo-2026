@@ -8,6 +8,7 @@
   let selectedSong = null;
   let searchTimeout = null;
   let spotifyConnected = false;
+  let currentGameState = null;
 
   function makeBtn(text, cls, handler) {
     const b = document.createElement('button');
@@ -136,18 +137,104 @@
   // ── Toggle manual input ────────────────────────────────────────
 
   const btnToggle = document.getElementById('btn-toggle-manual');
-  if (btnToggle) {
-    btnToggle.addEventListener('click', () => {
-      const fields = document.getElementById('manual-fields');
-      fields.classList.toggle('hidden');
-      btnToggle.textContent = fields.classList.contains('hidden') ? 'Manuell eingeben' : 'Verbergen';
-    });
+  function toggleManual() {
+    const fields = document.getElementById('manual-fields');
+    fields.classList.toggle('hidden');
+    btnToggle.textContent = fields.classList.contains('hidden') ? 'Manuell eingeben' : 'Verbergen';
   }
+  if (btnToggle) {
+    btnToggle.addEventListener('click', toggleManual);
+  }
+
+  // ── Control actions (shared by buttons and keyboard shortcuts) ──
+
+  function clearSongInputs() {
+    document.getElementById('input-title').value = '';
+    document.getElementById('input-artist').value = '';
+    document.getElementById('input-year').value = '';
+    searchInput.value = '';
+    resultsEl.innerHTML = '';
+    selectedSong = null;
+  }
+
+  function doSpin() {
+    socket.emit('start_spin');
+  }
+
+  function doRedrawCategory() {
+    socket.emit('redraw_category');
+    clearSongInputs();
+  }
+
+  function doRevealSolution() {
+    socket.emit('reveal_solution');
+  }
+
+  function doNextRound() {
+    socket.emit('next_round');
+    clearSongInputs();
+  }
+
+  function doReset() {
+    socket.emit('reset_game');
+  }
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────
+  // Ignored while typing in a text field, except Enter in the manual
+  // song fields (starts the song) — everything else stays mouse-only.
+
+  window.addEventListener('keydown', (e) => {
+    const target = e.target;
+    const isTextField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
+
+    if (isTextField) {
+      const manualFieldIds = ['input-title', 'input-artist', 'input-year'];
+      if (e.key === 'Enter' && manualFieldIds.includes(target.id)) {
+        e.preventDefault();
+        document.getElementById('btn-start-song').click();
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case ' ':
+        e.preventDefault();
+        if (currentGameState === 'lobby' || currentGameState === 'between_rounds') doSpin();
+        else if (currentGameState === 'playing') doRevealSolution();
+        else if (currentGameState === 'revealing') doNextRound();
+        break;
+      case 'd':
+      case 'D':
+        if (currentGameState === 'lobby' || currentGameState === 'between_rounds') doSpin();
+        break;
+      case 'k':
+      case 'K':
+        if (['spinning', 'playing', 'revealing'].includes(currentGameState)) doRedrawCategory();
+        break;
+      case 'l':
+      case 'L':
+        if (currentGameState === 'playing') doRevealSolution();
+        break;
+      case 'n':
+      case 'N':
+        if (currentGameState === 'revealing') doNextRound();
+        break;
+      case 'm':
+      case 'M':
+        if (currentGameState === 'spinning' && btnToggle && !btnToggle.classList.contains('hidden')) toggleManual();
+        break;
+      case 'r':
+      case 'R':
+        doReset();
+        break;
+    }
+  });
 
   // ── Game state rendering ───────────────────────────────────────
 
   socket.on('game_state', (state) => {
     const gs = state.gameState;
+    currentGameState = gs;
     const teams = Object.values(state.teams);
 
     // Spotify status bar
@@ -172,34 +259,18 @@
     // Controls
     controlsEl.innerHTML = '';
     if (gs === 'lobby' || gs === 'between_rounds') {
-      controlsEl.appendChild(makeBtn('Drehen', 'btn-primary', () => socket.emit('start_spin')));
+      controlsEl.appendChild(makeBtn('Drehen (D)', 'btn-primary', doSpin));
     }
     if (gs === 'spinning' || gs === 'playing' || gs === 'revealing') {
-      controlsEl.appendChild(makeBtn('Kategorie neu drehen', 'btn-secondary', () => {
-        socket.emit('redraw_category');
-        document.getElementById('input-title').value = '';
-        document.getElementById('input-artist').value = '';
-        document.getElementById('input-year').value = '';
-        searchInput.value = '';
-        resultsEl.innerHTML = '';
-        selectedSong = null;
-      }));
+      controlsEl.appendChild(makeBtn('Kategorie neu drehen (K)', 'btn-secondary', doRedrawCategory));
     }
     if (gs === 'playing') {
-      controlsEl.appendChild(makeBtn('Lösung zeigen', 'btn-danger', () => socket.emit('reveal_solution')));
+      controlsEl.appendChild(makeBtn('Lösung zeigen (L)', 'btn-danger', doRevealSolution));
     }
     if (gs === 'revealing') {
-      controlsEl.appendChild(makeBtn('Nächste Runde', 'btn-primary', () => {
-        socket.emit('next_round');
-        document.getElementById('input-title').value = '';
-        document.getElementById('input-artist').value = '';
-        document.getElementById('input-year').value = '';
-        searchInput.value = '';
-        resultsEl.innerHTML = '';
-        selectedSong = null;
-      }));
+      controlsEl.appendChild(makeBtn('Nächste Runde (N)', 'btn-primary', doNextRound));
     }
-    controlsEl.appendChild(makeBtn('Reset', 'btn-secondary', () => socket.emit('reset_game')));
+    controlsEl.appendChild(makeBtn('Reset (R)', 'btn-secondary', doReset));
 
     // Song form
     if (gs === 'spinning') {
