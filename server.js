@@ -24,7 +24,7 @@ const AUTH_TOKEN = crypto.createHmac('sha256', SESSION_SECRET).update('authentic
 
 const PROTECTED_PAGES = new Set([
   '/', '/index.html', '/display.html', '/moderator.html',
-  '/overview.html', '/boards.html', '/qr.html',
+  '/overview.html', '/qr.html',
 ]);
 
 function parseCookies(req) {
@@ -765,7 +765,6 @@ server.listen(PORT, () => {
   console.log('    Moderation:  http://localhost:' + PORT + '/moderator.html');
   console.log('    Team:        http://localhost:' + PORT + '/team.html');
   console.log('    Übersicht:   http://localhost:' + PORT + '/overview.html');
-  console.log('    Bingokarten: http://localhost:' + PORT + '/boards.html');
   console.log('');
   if (SPOTIFY_CLIENT_ID) {
     console.log('  Spotify Auth:  http://127.0.0.1:' + PORT + '/auth/spotify');
