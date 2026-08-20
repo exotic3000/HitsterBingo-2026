@@ -569,7 +569,7 @@
 
   socket.on('timer_tick', function(val) {
     renderTimer(document.getElementById('timer'), val);
-    if (window.HBSound && val > 0 && val <= 10) HBSound.timerBeep(val <= 3);
+    if (window.HBSound && val <= 10) HBSound.timerBeep(val);
   });
 
   function renderTeamDots(teams, answers) {
