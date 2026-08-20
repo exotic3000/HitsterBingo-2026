@@ -30,37 +30,59 @@
     osc.stop(startTime + duration + 0.03);
   }
 
-  // A short filtered-noise "clack" plus a low thump underneath — reads as a
-  // mechanical ratchet peg hitting a divider, not an electronic beep. Noise
-  // instead of a pure tone matters here: this fires many times per spin as
-  // the wheel slows, and a repeated pure pitch gets grating fast.
-  function playTick() {
+  // Filtered noise burst — the transient "clack" underlying both the spin
+  // tick and the wheel-stop clunk below. Noise instead of a pure tone
+  // matters for the tick especially: it fires many times per spin as the
+  // wheel slows, and a repeated pure pitch gets grating fast.
+  function noiseBurst(startTime, duration, opts) {
+    opts = opts || {};
     const c = getCtx();
-    const t0 = c.currentTime;
-
-    const dur = 0.03;
-    const bufferSize = Math.max(1, Math.floor(c.sampleRate * dur));
+    const bufferSize = Math.max(1, Math.floor(c.sampleRate * duration));
     const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
     const data = buffer.getChannelData(0);
+    const curve = opts.curve != null ? opts.curve : 2;
     for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2);
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, curve);
     }
     const noise = c.createBufferSource();
     noise.buffer = buffer;
-    const noiseFilter = c.createBiquadFilter();
-    noiseFilter.type = 'bandpass';
-    noiseFilter.frequency.value = 2200;
-    noiseFilter.Q.value = 0.8;
-    const noiseGain = c.createGain();
-    noiseGain.gain.setValueAtTime(0.4, t0);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseGain);
-    noiseGain.connect(c.destination);
-    noise.start(t0);
-    noise.stop(t0 + dur + 0.01);
+    const filter = c.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = opts.freq != null ? opts.freq : 2000;
+    filter.Q.value = opts.q != null ? opts.q : 0.8;
+    const gain = c.createGain();
+    const peak = opts.gain != null ? opts.gain : 0.4;
+    gain.gain.setValueAtTime(peak, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(c.destination);
+    noise.start(startTime);
+    noise.stop(startTime + duration + 0.01);
+  }
 
+  function playTick() {
+    const t0 = getCtx().currentTime;
+    noiseBurst(t0, 0.03, { freq: 2200, q: 0.8, gain: 0.4 });
     tone(180, t0, 0.05, { type: 'sine', gain: 0.15, slideTo: 110 });
+  }
+
+  // The wheel's final "clunk" as the pointer settles on the winning segment
+  // — a heavier, lower sibling of the spin tick (same noise+thump recipe),
+  // topped with a short metallic ring to mark the reveal. Called once, right
+  // when the spin animation actually finishes, not on every state sync (a
+  // reconnecting client re-displaying an already-decided result shouldn't
+  // replay it).
+  function playWheelLand() {
+    const t0 = getCtx().currentTime;
+    noiseBurst(t0, 0.09, { freq: 1400, q: 0.7, gain: 0.5, curve: 1.5 });
+    tone(90, t0, 0.22, { type: 'sine', gain: 0.3, slideTo: 55 });
+    tone(65, t0 + 0.02, 0.28, { type: 'sine', gain: 0.18, slideTo: 40 });
+
+    const ringStart = t0 + 0.09;
+    [1046.5, 1567.98, 2350].forEach((f, i) => {
+      tone(f, ringStart, 0.5 - i * 0.05, { type: 'triangle', gain: 0.1 - i * 0.02 });
+    });
   }
 
   // Countdown beep for the last 10s. A plain sine has no harmonics, so it
@@ -126,6 +148,7 @@
   window.HBSound = {
     unlock: getCtx,
     tick: playTick,
+    wheelLand: playWheelLand,
     timerBeep: playTimerBeep,
     bingo: playBingoFanfare,
   };

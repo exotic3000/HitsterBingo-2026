@@ -264,6 +264,7 @@
         requestAnimationFrame(animate);
       } else {
         isSpinning = false;
+        if (window.HBSound) HBSound.wheelLand();
         showResult(idx);
       }
     }
