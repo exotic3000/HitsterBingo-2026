@@ -103,6 +103,7 @@
     const clackStart = lockStart + 0.1;
     noiseBurst(clackStart, 0.03, { freq: 2800, q: 1.1, gain: 0.38 });
     tone(440.0, clackStart, 0.4, { type: 'triangle', gain: 0.38 }); // A4
+    tone(554.37, clackStart, 0.35, { type: 'triangle', gain: 0.16 }); // C#5 — major third makes it a bright A-major hit, not a bare pitch
     tone(440.0 * 2.01, clackStart, 0.26, { type: 'sine', gain: 0.1 }); // detuned overtone = metallic, not pure
     tone(220.0, clackStart, 0.17, { type: 'sine', gain: 0.16 }); // low body thump under the clack, for weight
 
@@ -114,29 +115,39 @@
   // a song, but reads as shrill and grating fast — this instead pairs a
   // low percussive click (the noiseBurst transient, same family as the
   // wheel tick) with a warm mid-register triangle tone, more "confident
-  // clock pulse" than "smoke alarm". Escalates gently: most of the window
-  // stays a quiet, brief pulse, and only the final 3 seconds firm up into a
-  // slightly fuller double-pulse — noticeably more present without turning
-  // painful, so it still lands after many rounds instead of wearing the
-  // room down.
+  // clock pulse" than "smoke alarm". A layered octave-below body note adds
+  // perceived loudness without raising the pitch (which is what would tip
+  // it back into shrill). Escalates gently: most of the window stays a
+  // quiet, brief pulse, and only the final 3 seconds firm up into a fuller
+  // double-pulse — noticeably more present without turning painful, so it
+  // still lands after many rounds instead of wearing the room down. The
+  // zero buzzer is the one moment allowed to actually punch through a loud
+  // song: a brief bright attack transient plus a louder double-hit.
   function playTimerBeep(secondsLeft) {
     const c = getCtx();
     const t0 = c.currentTime;
 
     if (secondsLeft <= 0) {
-      noiseBurst(t0, 0.05, { freq: 800, q: 0.6, gain: 0.28 });
-      tone(220, t0, 0.4, { type: 'triangle', gain: 0.26, slideTo: 110 });
-      tone(164.81, t0 + 0.03, 0.35, { type: 'sine', gain: 0.15, slideTo: 82.41 });
+      tone(880, t0, 0.05, { type: 'square', gain: 0.24 }); // short bright punch to grab the ear
+      noiseBurst(t0, 0.07, { freq: 900, q: 0.6, gain: 0.42 });
+      tone(220, t0, 0.55, { type: 'triangle', gain: 0.38, slideTo: 110 });
+      tone(164.81, t0 + 0.03, 0.5, { type: 'sine', gain: 0.22, slideTo: 82.41 });
+
+      const secondHit = t0 + 0.24;
+      tone(660, secondHit, 0.045, { type: 'square', gain: 0.18 });
+      noiseBurst(secondHit, 0.06, { freq: 900, q: 0.6, gain: 0.32 });
+      tone(196, secondHit, 0.45, { type: 'triangle', gain: 0.3, slideTo: 98 });
       return;
     }
 
     const urgent = secondsLeft <= 3;
     const freq = urgent ? 493.88 : 392.0; // B4 vs G4 — grounded, not piercing
-    const gain = urgent ? 0.2 : 0.11;
-    const dur = urgent ? 0.09 : 0.07;
+    const gain = urgent ? 0.3 : 0.18;
+    const dur = urgent ? 0.1 : 0.08;
 
-    noiseBurst(t0, dur * 0.5, { freq: urgent ? 1600 : 1100, q: 1, gain: urgent ? 0.16 : 0.08 });
+    noiseBurst(t0, dur * 0.5, { freq: urgent ? 1600 : 1100, q: 1, gain: urgent ? 0.22 : 0.12 });
     tone(freq, t0, dur, { type: 'triangle', gain });
+    tone(freq / 2, t0, dur * 1.3, { type: 'sine', gain: gain * 0.4 }); // octave-below body for perceived loudness
     if (urgent) tone(freq, t0 + 0.16, dur, { type: 'triangle', gain: gain * 0.85 });
   }
 
