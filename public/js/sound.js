@@ -69,25 +69,27 @@
 
   // The wheel's final "clunk" as the pointer settles on the winning segment
   // — a heavier, lower sibling of the spin tick (same noise+thump recipe) —
-  // immediately followed by a punchy two-note "check" ding confirming the
-  // category landed, instead of a soft trailing ring. Triangle wave and a
-  // lower octave keep it rounded and pleasant rather than the square wave's
-  // buzzy edge; the quick back-to-back rising interval is what still reads
-  // as an energetic confirmation. Called once, right when the spin
-  // animation actually finishes, not on every state sync (a reconnecting
-  // client re-displaying an already-decided result shouldn't replay it).
+  // followed by a quick decaying flurry of the exact same tick recipe,
+  // like the ratchet arm still rattling briefly before it fully settles.
+  // Earlier drafts closed this out with a musical ding, but that read as an
+  // unrelated UI "check" sound bolted onto a mechanical sequence; staying
+  // entirely in the noise+thump vocabulary from the spin keeps the reveal
+  // feeling like a continuation of the same wheel instead of a new, shriller
+  // sound. Called once, right when the spin animation actually finishes,
+  // not on every state sync (a reconnecting client re-displaying an
+  // already-decided result shouldn't replay it).
   function playWheelLand() {
     const t0 = getCtx().currentTime;
     noiseBurst(t0, 0.09, { freq: 1400, q: 0.7, gain: 0.5, curve: 1.5 });
     tone(90, t0, 0.22, { type: 'sine', gain: 0.3, slideTo: 55 });
     tone(65, t0 + 0.02, 0.28, { type: 'sine', gain: 0.18, slideTo: 40 });
 
-    const dingStart = t0 + 0.1;
-    tone(659.25, dingStart, 0.15, { type: 'triangle', gain: 0.22 }); // E5
-    tone(1318.51, dingStart, 0.1, { type: 'sine', gain: 0.05 });
-    noiseBurst(dingStart + 0.1, 0.02, { freq: 1400, q: 1, gain: 0.1 });
-    tone(987.77, dingStart + 0.1, 0.32, { type: 'triangle', gain: 0.26 }); // B5
-    tone(1975.99, dingStart + 0.1, 0.18, { type: 'sine', gain: 0.06 });
+    const rattleOffsets = [0.11, 0.17, 0.22, 0.26];
+    rattleOffsets.forEach((offset, i) => {
+      const decay = 1 - i / rattleOffsets.length;
+      noiseBurst(t0 + offset, 0.025, { freq: 2200 - i * 150, q: 0.8, gain: 0.3 * decay });
+      tone(150 - i * 12, t0 + offset, 0.04, { type: 'sine', gain: 0.12 * decay, slideTo: 90 });
+    });
   }
 
   // Countdown pulse for the last 10s. A high square-wave alarm cuts through
@@ -203,20 +205,39 @@
     osc.stop(startTime + dur + 0.05);
   }
 
-  // Victory fanfare for Bingo: a crowd-cheer swell and a couple of shouted
-  // "wooo!"s underneath a quick ascending run that lands on a sustained
-  // major chord (the actual "ta-da"), with a few soft sparkle notes over
-  // the chord's decay. Kept in a lower register throughout (triangle waves,
-  // no octave-up partial pushed too high) so it stays warm rather than
-  // piercing — the crowd swell and vocal-register whoops are what make it
-  // read as people celebrating instead of a synth jingle.
+  // Scattered short noise clicks standing in for a burst of applause —
+  // layered under the cheer and whoops to thicken the "crowd" texture.
+  function applauseBurst(startTime, duration, count) {
+    for (let i = 0; i < count; i++) {
+      const t = startTime + Math.random() * duration;
+      noiseBurst(t, 0.02 + Math.random() * 0.02, {
+        freq: 2200 + Math.random() * 1600,
+        q: 1.2,
+        gain: 0.07 + Math.random() * 0.06,
+      });
+    }
+  }
+
+  // Victory fanfare for Bingo: two overlapping crowd-cheer swells and a
+  // scatter of applause clicks underneath several staggered, differently
+  // pitched "wooo!"s — more like a full room reacting at once than a single
+  // voice — leading into a quick ascending run that lands on a sustained
+  // major chord (the actual "ta-da"), with soft sparkle notes over the
+  // chord's decay. Kept in a lower register throughout (triangle waves, no
+  // octave-up partial pushed too high) so it stays warm rather than
+  // piercing — the crowd/applause layer and vocal-register whoops are what
+  // make it read as people celebrating instead of a synth jingle.
   function playBingoFanfare() {
     const c = getCtx();
     const t0 = c.currentTime;
 
     crowdCheer(t0, 1.6);
+    crowdCheer(t0 + 0.18, 1.35);
+    applauseBurst(t0 + 0.1, 1.2, 18);
+
     humanWhoop(t0 + 0.05, { from: 220, to: 370, dur: 0.5, gain: 0.16 });
-    humanWhoop(t0 + 0.35, { from: 196, to: 330, dur: 0.55, gain: 0.13 });
+    humanWhoop(t0 + 0.22, { from: 260, to: 440, dur: 0.42, gain: 0.12 });
+    humanWhoop(t0 + 0.4, { from: 196, to: 330, dur: 0.55, gain: 0.13 });
 
     const run = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
     run.forEach((f, i) => {
@@ -232,6 +253,7 @@
     });
 
     humanWhoop(chordStart + 0.15, { from: 240, to: 420, dur: 0.45, gain: 0.13 });
+    humanWhoop(chordStart + 0.4, { from: 210, to: 360, dur: 0.4, gain: 0.1 });
 
     const sparkleNotes = [1046.5, 1174.66, 1318.51, 1567.98]; // C6 D6 E6 G6
     for (let i = 0; i < 5; i++) {
