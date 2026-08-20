@@ -91,10 +91,19 @@
       tone(150 - i * 12, t0 + offset, 0.04, { type: 'sine', gain: 0.12 * decay, slideTo: 90 });
     });
 
+    // Two-stage "click...CLACK" — a small pre-click then a firmer, higher,
+    // longer hit — reading as a mechanical flag/switch snapping into its
+    // confirmed position. A single quiet note (the earlier version) got
+    // buried under the rattle; the two-step rise plus the louder second hit
+    // is what actually registers as "locked in" rather than a footnote.
     const lockStart = t0 + 0.33;
-    noiseBurst(lockStart, 0.02, { freq: 2600, q: 1.2, gain: 0.16 });
-    tone(392.0, lockStart, 0.3, { type: 'triangle', gain: 0.22 }); // G4
-    tone(392.0 * 2.01, lockStart, 0.2, { type: 'sine', gain: 0.06 }); // slightly detuned overtone = metallic, not pure
+    noiseBurst(lockStart, 0.018, { freq: 2400, q: 1, gain: 0.2 });
+    tone(329.63, lockStart, 0.07, { type: 'triangle', gain: 0.18 }); // E4
+
+    const clackStart = lockStart + 0.1;
+    noiseBurst(clackStart, 0.025, { freq: 2800, q: 1.1, gain: 0.3 });
+    tone(440.0, clackStart, 0.34, { type: 'triangle', gain: 0.3 }); // A4
+    tone(440.0 * 2.01, clackStart, 0.22, { type: 'sine', gain: 0.08 }); // detuned overtone = metallic, not pure
   }
 
   // Countdown pulse for the last 10s. A high square-wave alarm cuts through
