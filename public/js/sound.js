@@ -71,11 +71,9 @@
   // — a heavier, lower sibling of the spin tick (same noise+thump recipe) —
   // followed by a quick decaying flurry of the exact same tick recipe, like
   // the ratchet arm still rattling briefly before it fully settles. That
-  // rattle alone lost the "something got selected" feeling a musical ding
-  // used to carry, so it closes on one single resonant note — a click plus
-  // a detuned pair of oscillators for a metallic shimmer rather than a
-  // clean pitch — reading as a mechanical indicator locking into place
-  // instead of a full UI ding-ding. Called once, right when the spin
+  // mechanical part matches the spin; a checkmark gesture (see below) then
+  // marks the category as actually selected, arriving after a short pause
+  // instead of overlapping the rattle. Called once, right when the spin
   // animation actually finishes, not on every state sync (a reconnecting
   // client re-displaying an already-decided result shouldn't replay it).
   function playWheelLand() {
@@ -91,30 +89,34 @@
       tone(150 - i * 12, t0 + offset, 0.04, { type: 'sine', gain: 0.12 * decay, slideTo: 90 });
     });
 
-    // Two-stage "click...CLACK" — a small pre-click then a firmer, higher,
-    // longer hit — reading as a mechanical flag/switch snapping into its
-    // confirmed position. A single quiet note (the earlier version) got
-    // buried under the rattle; the two-step rise plus the louder second hit
-    // is what actually registers as "locked in" rather than a footnote.
-    const lockStart = t0 + 0.33;
-    noiseBurst(lockStart, 0.018, { freq: 2400, q: 1, gain: 0.22 });
-    tone(329.63, lockStart, 0.07, { type: 'triangle', gain: 0.2 }); // E4
+    // A beat of near-silence after the rattle settles, so what follows
+    // reads as its own deliberate gesture — a checkmark being drawn — not a
+    // continuation of the mechanical settling. The checkmark itself is a
+    // literal down-then-up motion: a quick, low downstroke click,
+    // immediately followed by a bigger upward leap into the held A-major
+    // chord (the actual "check"). The previous version started the leap
+    // from right above the downstroke, which reads as a doorbell more than
+    // a checkmark; the wider gap here is what makes it feel like something
+    // was actively selected.
+    const checkStart = t0 + 0.46;
+    noiseBurst(checkStart, 0.02, { freq: 2200, q: 1, gain: 0.24 });
+    tone(246.94, checkStart, 0.06, { type: 'triangle', gain: 0.24 }); // B3 — the downstroke
 
-    const clackStart = lockStart + 0.1;
-    noiseBurst(clackStart, 0.03, { freq: 2800, q: 1.1, gain: 0.38 });
-    tone(440.0, clackStart, 0.4, { type: 'triangle', gain: 0.38 }); // A4
-    tone(554.37, clackStart, 0.35, { type: 'triangle', gain: 0.16 }); // C#5 — major third
-    tone(659.25, clackStart, 0.32, { type: 'triangle', gain: 0.11 }); // E5 — fifth, completes the full A-major triad for a fuller, happier chord
-    tone(440.0 * 2.01, clackStart, 0.26, { type: 'sine', gain: 0.1 }); // detuned overtone = metallic, not pure
-    tone(220.0, clackStart, 0.17, { type: 'sine', gain: 0.16 }); // low body thump under the clack, for weight
+    const upstrokeStart = checkStart + 0.075;
+    noiseBurst(upstrokeStart, 0.03, { freq: 2800, q: 1.1, gain: 0.4 });
+    tone(440.0, upstrokeStart, 0.42, { type: 'triangle', gain: 0.4 }); // A4 — the upstroke
+    tone(554.37, upstrokeStart, 0.36, { type: 'triangle', gain: 0.17 }); // C#5 — major third
+    tone(659.25, upstrokeStart, 0.33, { type: 'triangle', gain: 0.12 }); // E5 — fifth, full A-major triad
+    tone(440.0 * 2.01, upstrokeStart, 0.26, { type: 'sine', gain: 0.1 }); // detuned overtone = metallic, not pure
+    tone(220.0, upstrokeStart, 0.17, { type: 'sine', gain: 0.16 }); // low body thump under the hit, for weight
 
     // Tiny tail sparkle capping the gesture — finality without going shrill.
-    noiseBurst(clackStart + 0.13, 0.015, { freq: 3400, q: 1.4, gain: 0.09 });
+    noiseBurst(upstrokeStart + 0.13, 0.015, { freq: 3400, q: 1.4, gain: 0.09 });
 
     // Playful little upward grace-note flick right after the hit — a small
     // "smile" accent rather than anything sustained or bright enough to
     // read as shrill.
-    tone(880.0, clackStart + 0.1, 0.12, { type: 'sine', gain: 0.09, slideTo: 1108.73 });
+    tone(880.0, upstrokeStart + 0.1, 0.12, { type: 'sine', gain: 0.09, slideTo: 1108.73 });
   }
 
   // Countdown pulse for the last 10s. A high square-wave alarm cuts through
