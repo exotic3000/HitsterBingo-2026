@@ -97,13 +97,17 @@
     // buried under the rattle; the two-step rise plus the louder second hit
     // is what actually registers as "locked in" rather than a footnote.
     const lockStart = t0 + 0.33;
-    noiseBurst(lockStart, 0.018, { freq: 2400, q: 1, gain: 0.2 });
-    tone(329.63, lockStart, 0.07, { type: 'triangle', gain: 0.18 }); // E4
+    noiseBurst(lockStart, 0.018, { freq: 2400, q: 1, gain: 0.22 });
+    tone(329.63, lockStart, 0.07, { type: 'triangle', gain: 0.2 }); // E4
 
     const clackStart = lockStart + 0.1;
-    noiseBurst(clackStart, 0.025, { freq: 2800, q: 1.1, gain: 0.3 });
-    tone(440.0, clackStart, 0.34, { type: 'triangle', gain: 0.3 }); // A4
-    tone(440.0 * 2.01, clackStart, 0.22, { type: 'sine', gain: 0.08 }); // detuned overtone = metallic, not pure
+    noiseBurst(clackStart, 0.03, { freq: 2800, q: 1.1, gain: 0.38 });
+    tone(440.0, clackStart, 0.4, { type: 'triangle', gain: 0.38 }); // A4
+    tone(440.0 * 2.01, clackStart, 0.26, { type: 'sine', gain: 0.1 }); // detuned overtone = metallic, not pure
+    tone(220.0, clackStart, 0.17, { type: 'sine', gain: 0.16 }); // low body thump under the clack, for weight
+
+    // Tiny tail sparkle capping the gesture — finality without going shrill.
+    noiseBurst(clackStart + 0.13, 0.015, { freq: 3400, q: 1.4, gain: 0.09 });
   }
 
   // Countdown pulse for the last 10s. A high square-wave alarm cuts through
