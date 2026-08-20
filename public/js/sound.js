@@ -69,9 +69,11 @@
 
   // The wheel's final "clunk" as the pointer settles on the winning segment
   // — a heavier, lower sibling of the spin tick (same noise+thump recipe) —
-  // immediately followed by a punchy two-note "check" ding (square wave for
-  // bite, a snappy perfect-fifth jump up) confirming the category landed,
-  // instead of a soft trailing ring. Called once, right when the spin
+  // immediately followed by a punchy two-note "check" ding confirming the
+  // category landed, instead of a soft trailing ring. Triangle wave and a
+  // lower octave keep it rounded and pleasant rather than the square wave's
+  // buzzy edge; the quick back-to-back rising interval is what still reads
+  // as an energetic confirmation. Called once, right when the spin
   // animation actually finishes, not on every state sync (a reconnecting
   // client re-displaying an already-decided result shouldn't replay it).
   function playWheelLand() {
@@ -81,11 +83,11 @@
     tone(65, t0 + 0.02, 0.28, { type: 'sine', gain: 0.18, slideTo: 40 });
 
     const dingStart = t0 + 0.1;
-    tone(1318.51, dingStart, 0.14, { type: 'square', gain: 0.24 }); // E6
-    tone(2637.02, dingStart, 0.09, { type: 'sine', gain: 0.06 });
-    noiseBurst(dingStart + 0.09, 0.02, { freq: 3000, q: 1, gain: 0.15 });
-    tone(1975.99, dingStart + 0.09, 0.3, { type: 'square', gain: 0.28 }); // B6
-    tone(3951.98, dingStart + 0.09, 0.18, { type: 'sine', gain: 0.07 });
+    tone(659.25, dingStart, 0.15, { type: 'triangle', gain: 0.22 }); // E5
+    tone(1318.51, dingStart, 0.1, { type: 'sine', gain: 0.05 });
+    noiseBurst(dingStart + 0.1, 0.02, { freq: 1400, q: 1, gain: 0.1 });
+    tone(987.77, dingStart + 0.1, 0.32, { type: 'triangle', gain: 0.26 }); // B5
+    tone(1975.99, dingStart + 0.1, 0.18, { type: 'sine', gain: 0.06 });
   }
 
   // Countdown pulse for the last 10s. A high square-wave alarm cuts through
@@ -135,9 +137,9 @@
     const filter = c.createBiquadFilter();
     filter.type = 'bandpass';
     filter.Q.value = 0.7;
-    filter.frequency.setValueAtTime(500, startTime);
-    filter.frequency.linearRampToValueAtTime(2200, startTime + duration * 0.35);
-    filter.frequency.linearRampToValueAtTime(1100, startTime + duration);
+    filter.frequency.setValueAtTime(450, startTime);
+    filter.frequency.linearRampToValueAtTime(1700, startTime + duration * 0.35);
+    filter.frequency.linearRampToValueAtTime(950, startTime + duration);
 
     const gain = c.createGain();
     gain.gain.setValueAtTime(0.0001, startTime);
@@ -152,61 +154,90 @@
     noise.stop(startTime + duration + 0.05);
   }
 
-  // A quick rising glissando — reads as a party whistle/"woo!" amid a cheer.
-  function cheerWhoop(startTime, opts) {
+  // A shouted "wooo!" — a sawtooth in a human vocal-fundamental register,
+  // pushed through a resonant bandpass sweep that moves like an open mouth
+  // shaping a vowel, plus light vibrato so the pitch isn't perfectly steady.
+  // A clean oscillator gliding straight up (the previous version) reads as
+  // a synth/party-whistle; the formant sweep and vibrato are what make this
+  // sound like an actual voice instead.
+  function humanWhoop(startTime, opts) {
     opts = opts || {};
     const c = getCtx();
+    const dur = opts.dur != null ? opts.dur : 0.5;
+    const baseFreq = opts.from || 220;
+    const peakFreq = opts.to || 340;
+
     const osc = c.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(baseFreq, startTime);
+    osc.frequency.linearRampToValueAtTime(peakFreq, startTime + dur * 0.4);
+    osc.frequency.linearRampToValueAtTime(peakFreq * 0.85, startTime + dur);
+
+    const vibrato = c.createOscillator();
+    vibrato.frequency.value = 6.5;
+    const vibratoGain = c.createGain();
+    vibratoGain.gain.value = peakFreq * 0.02;
+    vibrato.connect(vibratoGain);
+    vibratoGain.connect(osc.frequency);
+    vibrato.start(startTime);
+    vibrato.stop(startTime + dur + 0.05);
+
+    const filter = c.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.value = 3.5;
+    filter.frequency.setValueAtTime(600, startTime);
+    filter.frequency.linearRampToValueAtTime(1300, startTime + dur * 0.5);
+    filter.frequency.linearRampToValueAtTime(850, startTime + dur);
+
     const gain = c.createGain();
-    const dur = opts.dur != null ? opts.dur : 0.25;
-    osc.type = opts.type || 'sawtooth';
-    osc.frequency.setValueAtTime(opts.from || 300, startTime);
-    osc.frequency.exponentialRampToValueAtTime(opts.to || 1400, startTime + dur);
-    const peak = opts.gain != null ? opts.gain : 0.12;
+    const peak = opts.gain != null ? opts.gain : 0.16;
     gain.gain.setValueAtTime(0.0001, startTime);
-    gain.gain.linearRampToValueAtTime(peak, startTime + dur * 0.3);
+    gain.gain.linearRampToValueAtTime(peak, startTime + dur * 0.2);
+    gain.gain.linearRampToValueAtTime(peak * 0.7, startTime + dur * 0.7);
     gain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur);
-    osc.connect(gain);
+
+    osc.connect(filter);
+    filter.connect(gain);
     gain.connect(c.destination);
     osc.start(startTime);
-    osc.stop(startTime + dur + 0.02);
+    osc.stop(startTime + dur + 0.05);
   }
 
-  // Victory fanfare for Bingo: a crowd-cheer swell and a couple of whistle
-  // whoops underneath a quick ascending run that lands on a big sustained
-  // major chord (the actual "ta-da"), with random high sparkle notes
-  // twinkling over the chord's decay. The cheer layer is what turns this
-  // from "synth jingle" into something that actually sounds like people
-  // celebrating.
+  // Victory fanfare for Bingo: a crowd-cheer swell and a couple of shouted
+  // "wooo!"s underneath a quick ascending run that lands on a sustained
+  // major chord (the actual "ta-da"), with a few soft sparkle notes over
+  // the chord's decay. Kept in a lower register throughout (triangle waves,
+  // no octave-up partial pushed too high) so it stays warm rather than
+  // piercing — the crowd swell and vocal-register whoops are what make it
+  // read as people celebrating instead of a synth jingle.
   function playBingoFanfare() {
     const c = getCtx();
     const t0 = c.currentTime;
 
     crowdCheer(t0, 1.6);
-    cheerWhoop(t0 + 0.05, { from: 300, to: 1500, dur: 0.28, gain: 0.14 });
-    cheerWhoop(t0 + 0.32, { from: 260, to: 1300, dur: 0.3, gain: 0.12, type: 'square' });
+    humanWhoop(t0 + 0.05, { from: 220, to: 370, dur: 0.5, gain: 0.16 });
+    humanWhoop(t0 + 0.35, { from: 196, to: 330, dur: 0.55, gain: 0.13 });
 
     const run = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
     run.forEach((f, i) => {
       const t = t0 + i * 0.09;
-      tone(f, t, 0.14, { type: 'sawtooth', gain: 0.16 });
-      tone(f * 2, t, 0.1, { type: 'sine', gain: 0.05 });
+      tone(f, t, 0.14, { type: 'triangle', gain: 0.18 });
     });
 
     const chordStart = t0 + run.length * 0.09 + 0.03;
-    const chord = [1046.5, 1318.51, 1567.98, 2093.0]; // C6 E6 G6 C7
+    const chord = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
     chord.forEach((f) => {
-      tone(f, chordStart, 1.1, { type: 'triangle', gain: 0.22 });
-      tone(f * 2, chordStart, 0.7, { type: 'sine', gain: 0.06 });
+      tone(f, chordStart, 1.1, { type: 'triangle', gain: 0.24 });
+      tone(f * 2, chordStart, 0.6, { type: 'sine', gain: 0.05 });
     });
 
-    cheerWhoop(chordStart + 0.15, { from: 500, to: 1900, dur: 0.32, gain: 0.11 });
+    humanWhoop(chordStart + 0.15, { from: 240, to: 420, dur: 0.45, gain: 0.13 });
 
-    const sparkleNotes = [2093.0, 2349.32, 2637.02, 3135.96]; // C7 D7 E7 G7
-    for (let i = 0; i < 6; i++) {
+    const sparkleNotes = [1046.5, 1174.66, 1318.51, 1567.98]; // C6 D6 E6 G6
+    for (let i = 0; i < 5; i++) {
       const f = sparkleNotes[Math.floor(Math.random() * sparkleNotes.length)];
       const t = chordStart + 0.1 + Math.random() * 0.7;
-      tone(f, t, 0.18, { type: 'sine', gain: 0.06 });
+      tone(f, t, 0.18, { type: 'sine', gain: 0.05 });
     }
   }
 
