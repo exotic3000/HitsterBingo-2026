@@ -50,8 +50,27 @@
       <a id="spotify-link" href="/auth/spotify" target="_blank" class="btn btn-secondary" style="margin-left:auto;padding:.4rem .8rem;font-size:.7rem">Verbinden</a>
     </div>
 
-    <!-- Controls -->
+    <!-- Automatischer Moderator -->
     <div class="card mb" style="max-width:650px">
+      <div class="flex justify-between items-center gap-sm flex-wrap">
+        <div>
+          <div style="font-weight:600">🤖 Automatischer Moderator</div>
+          <p style="font-size:.75rem;color:var(--text-dim);margin-top:.15rem">Spielt die Runden selbstständig durch — Drehen, Song, Timer &amp; Auflösung. Ideal, wenn der Host selbst als Team mitspielen will.</p>
+        </div>
+        <label class="switch" title="Automatischen Moderator ein-/ausschalten">
+          <input type="checkbox" id="auto-moderator-toggle">
+          <span class="switch-slider"></span>
+        </label>
+      </div>
+      <div id="auto-moderator-settings" class="mt">
+        <label for="select-auto-playlist" style="display:block;font-size:.75rem;color:var(--text-dim);margin-bottom:.35rem">Playlist für den Auto-Modus</label>
+        <select id="select-auto-playlist" class="select"></select>
+      </div>
+      <p id="auto-moderator-status" class="hidden" style="font-size:.8rem;color:var(--green);margin-top:.75rem">🤖 Automatischer Moderator läuft — die Steuerung unten übernimmt der Server.</p>
+    </div>
+
+    <!-- Controls -->
+    <div id="controls-card" class="card mb" style="max-width:650px">
       <div id="controls" class="flex gap-sm flex-wrap items-center"></div>
 
       <!-- Song selection (shown during spinning) -->

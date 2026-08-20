@@ -196,6 +196,47 @@ let currentSong = null;
 let timerValue = TIMER_SECONDS;
 let timerInterval = null;
 
+// ── Automatischer Moderator ─────────────────────────────────────
+// Lässt das Spiel ohne Bedienung durchlaufen (Drehen → Song → Timer →
+// Auflösung → nächste Runde → ...), damit der Host per Team-Handy
+// mitspielen kann, statt selbst zu moderieren. Teams haken ihre Karten
+// nach der Auflösung ohnehin schon selbst ab (siehe team.js), daher
+// genügt es, den Rundenablauf serverseitig zu automatisieren.
+let autoModeratorEnabled = false;
+let autoModeratorPlaylist = 0;
+let autoModeratorTimer = null;
+let autoModeratorRetries = 0;
+const AUTO_SPIN_REVEAL_MS = 9000;    // Zeit bis der Song nach dem Drehen automatisch gewählt & gestartet wird (Rad-Animation + Mystery-Auflösung)
+const AUTO_REVEAL_HOLD_MS = 1500;    // kurze Pause zwischen Timer-Ende und automatischer Lösungsanzeige
+const AUTO_REVEAL_DURATION_MS = 20000; // Zeit für die Teams, ihre Bingokarten nach der Lösung selbst abzuhaken
+const AUTO_BETWEEN_ROUNDS_MS = 5000; // Pause zwischen Runden, bevor automatisch neu gedreht wird
+const AUTO_RETRY_MS = 4000;          // Wiederholversuch, falls kein Song geladen werden konnte
+const AUTO_MAX_RETRIES = 5;
+
+function clearAutoModeratorTimer() {
+  if (autoModeratorTimer) {
+    clearTimeout(autoModeratorTimer);
+    autoModeratorTimer = null;
+  }
+}
+
+// Schedules the next auto-moderator step. Re-checks the flag at fire time
+// (not just now) so toggling auto mode off mid-wait reliably cancels it.
+function scheduleAuto(fn, delayMs) {
+  clearAutoModeratorTimer();
+  autoModeratorTimer = setTimeout(() => {
+    autoModeratorTimer = null;
+    if (autoModeratorEnabled) fn();
+  }, delayMs);
+}
+
+function stopAutoModerator(reason) {
+  autoModeratorEnabled = false;
+  clearAutoModeratorTimer();
+  if (reason) io.emit('auto_moderator_stopped', { reason });
+  broadcast();
+}
+
 // ── Helper Functions ────────────────────────────────────────────
 
 function shuffle(arr) {
@@ -283,6 +324,8 @@ function getFullState() {
     timerValue,
     categories: CATEGORIES,
     spotifyReady: !!spotifyAccessToken,
+    autoModeratorEnabled,
+    autoModeratorPlaylist,
   };
 }
 
@@ -306,6 +349,7 @@ function startTimer() {
       clearTimer();
       io.emit('spotify_pause');
       broadcast();
+      if (autoModeratorEnabled) scheduleAuto(doRevealSolution, AUTO_REVEAL_HOLD_MS);
     }
   }, 1000);
 }
@@ -468,45 +512,58 @@ app.get('/api/spotify/playlists', (req, res) => {
   res.json({ playlists: SPOTIFY_PLAYLISTS.map((p, index) => ({ index, name: p.name })) });
 });
 
-app.get('/api/spotify/playlist-random', async (req, res) => {
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+// Shared by the moderator's "Zufälliger Song" button and the automatic
+// moderator loop, so both pick songs the exact same way.
+async function fetchRandomPlaylistTrack(playlistIndex) {
   const token = await getValidToken();
-  if (!token) return res.status(401).json({ error: 'Nicht mit Spotify verbunden' });
+  if (!token) throw httpError(401, 'Nicht mit Spotify verbunden');
 
-  const playlist = SPOTIFY_PLAYLISTS[parseInt(req.query.playlist)] || SPOTIFY_PLAYLISTS[0];
+  const playlist = SPOTIFY_PLAYLISTS[playlistIndex] || SPOTIFY_PLAYLISTS[0];
   const playlistId = extractPlaylistId(playlist?.url);
-  if (!playlistId) return res.status(400).json({ error: 'Keine Playlist im Code hinterlegt (SPOTIFY_PLAYLISTS in server.js)' });
+  if (!playlistId) throw httpError(400, 'Keine Playlist im Code hinterlegt (SPOTIFY_PLAYLISTS in server.js)');
 
-  try {
-    const metaResp = await fetch(
-      'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=items.total',
+  const metaResp = await fetch(
+    'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=items.total',
+    { headers: { 'Authorization': 'Bearer ' + token } }
+  );
+  const meta = await metaResp.json();
+  console.log('[playlist-random] playlistId=' + playlistId + ' status=' + metaResp.status + ' body=' + JSON.stringify(meta));
+  if (!metaResp.ok) throw httpError(metaResp.status, meta.error?.message || 'Playlist nicht gefunden');
+
+  const total = meta.items?.total || 0;
+  if (!total) throw httpError(404, 'Playlist ist leer — Spotify-Antwort: ' + JSON.stringify(meta));
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const offset = Math.floor(Math.random() * total);
+    const resp = await fetch(
+      'https://api.spotify.com/v1/playlists/' + playlistId + '/items?' + querystring.stringify({
+        limit: 1, offset, market: 'DE',
+        fields: 'items(is_local,item(name,uri,id,artists,album,preview_url,duration_ms))',
+      }),
       { headers: { 'Authorization': 'Bearer ' + token } }
     );
-    const meta = await metaResp.json();
-    console.log('[playlist-random] playlistId=' + playlistId + ' status=' + metaResp.status + ' body=' + JSON.stringify(meta));
-    if (!metaResp.ok) return res.status(metaResp.status).json({ error: meta.error?.message || 'Playlist nicht gefunden' });
-
-    const total = meta.items?.total || 0;
-    if (!total) return res.status(404).json({ error: 'Playlist ist leer — Spotify-Antwort: ' + JSON.stringify(meta) });
-
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const offset = Math.floor(Math.random() * total);
-      const resp = await fetch(
-        'https://api.spotify.com/v1/playlists/' + playlistId + '/items?' + querystring.stringify({
-          limit: 1, offset, market: 'DE',
-          fields: 'items(is_local,item(name,uri,id,artists,album,preview_url,duration_ms))',
-        }),
-        { headers: { 'Authorization': 'Bearer ' + token } }
-      );
-      const data = await resp.json();
-      const entry = data.items?.[0];
-      const track = entry?.item;
-      if (track && !entry.is_local && track.uri) {
-        return res.json({ track: mapTrack(track) });
-      }
+    const data = await resp.json();
+    const entry = data.items?.[0];
+    const track = entry?.item;
+    if (track && !entry.is_local && track.uri) {
+      return mapTrack(track);
     }
-    res.status(404).json({ error: 'Kein abspielbarer Song in der Playlist gefunden' });
+  }
+  throw httpError(404, 'Kein abspielbarer Song in der Playlist gefunden');
+}
+
+app.get('/api/spotify/playlist-random', async (req, res) => {
+  try {
+    const track = await fetchRandomPlaylistTrack(parseInt(req.query.playlist));
+    res.json({ track });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -549,6 +606,117 @@ app.put('/api/spotify/pause', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ── Round actions ───────────────────────────────────────────────
+// Shared by the socket handlers (manual/moderator-triggered) and the
+// automatic moderator loop below, so both drive the exact same state
+// transitions instead of duplicating the logic.
+
+function doStartSpin() {
+  gameState = 'spinning';
+  spinToken++;
+  currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+  currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
+  answers.clear();
+  broadcast();
+
+  if (autoModeratorEnabled) {
+    autoModeratorRetries = 0;
+    scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
+  }
+}
+
+function doSetSong(song) {
+  currentSong = song;
+  gameState = 'playing';
+  timerValue = TIMER_SECONDS;
+  broadcast();
+  startTimer();
+  // Tell display to start Spotify playback
+  if (song.spotifyUri) {
+    io.emit('spotify_play', { uri: song.spotifyUri });
+  }
+}
+
+async function doAutoPickSong() {
+  if (!autoModeratorEnabled) return;
+  try {
+    const track = await fetchRandomPlaylistTrack(autoModeratorPlaylist);
+    autoModeratorRetries = 0;
+    doSetSong({
+      title: track.title,
+      artist: track.artist,
+      year: track.year,
+      spotifyUri: track.spotifyUri,
+      cover: track.cover,
+    });
+  } catch (e) {
+    autoModeratorRetries++;
+    if (autoModeratorRetries >= AUTO_MAX_RETRIES) {
+      autoModeratorRetries = 0;
+      stopAutoModerator('Konnte keinen Song laden: ' + e.message);
+      return;
+    }
+    scheduleAuto(doAutoPickSong, AUTO_RETRY_MS);
+  }
+}
+
+function doRevealSolution() {
+  clearTimer();
+  gameState = 'revealing';
+  io.emit('spotify_pause');
+  broadcast();
+
+  if (autoModeratorEnabled) scheduleAuto(doNextRound, AUTO_REVEAL_DURATION_MS);
+}
+
+function doRedrawCategory() {
+  clearTimer();
+  spinToken++;
+  currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+  currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
+  currentSong = null;
+  answers.clear();
+  gameState = 'spinning';
+  io.emit('spotify_pause');
+  broadcast();
+
+  if (autoModeratorEnabled) {
+    autoModeratorRetries = 0;
+    scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
+  }
+}
+
+function doNextRound() {
+  currentRound++;
+  currentCategory = null;
+  currentMysterySub = null;
+  currentSong = null;
+  answers.clear();
+  gameState = 'between_rounds';
+  broadcast();
+
+  if (autoModeratorEnabled) scheduleAuto(doStartSpin, AUTO_BETWEEN_ROUNDS_MS);
+}
+
+function doResetGame() {
+  clearTimer();
+  currentRound = 0;
+  currentCategory = null;
+  currentMysterySub = null;
+  currentSong = null;
+  answers.clear();
+  gameState = 'lobby';
+  for (const [, team] of teams) {
+    team.bingoCard = generateBingoCard();
+    team.score = 0;
+    team.hasBingo = false;
+  }
+  io.emit('spotify_pause');
+  broadcast();
+
+  if (autoModeratorEnabled) scheduleAuto(doStartSpin, AUTO_BETWEEN_ROUNDS_MS);
+}
 
 // ── Socket.IO ───────────────────────────────────────────────────
 
@@ -625,24 +793,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('start_spin', () => {
-    gameState = 'spinning';
-    spinToken++;
-    currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
-    currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
-    answers.clear();
-    broadcast();
+    clearAutoModeratorTimer();
+    doStartSpin();
   });
 
   socket.on('set_song', (song) => {
-    currentSong = song;
-    gameState = 'playing';
-    timerValue = TIMER_SECONDS;
-    broadcast();
-    startTimer();
-    // Tell display to start Spotify playback
-    if (song.spotifyUri) {
-      io.emit('spotify_play', { uri: song.spotifyUri });
-    }
+    clearAutoModeratorTimer();
+    doSetSong(song);
   });
 
   socket.on('submit_answer', (data) => {
@@ -652,10 +809,54 @@ io.on('connection', (socket) => {
   });
 
   socket.on('reveal_solution', () => {
-    clearTimer();
-    gameState = 'revealing';
-    io.emit('spotify_pause');
+    clearAutoModeratorTimer();
+    doRevealSolution();
+  });
+
+  // Turns the automatic moderator loop on/off. While enabled, the server
+  // itself drives start_spin → auto-picked song → timer → reveal_solution →
+  // next_round in a loop, so the host can join as a team on their phone
+  // instead of operating this screen. Manual controls keep working on top
+  // of it — each one clears the pending auto step and, if the action itself
+  // schedules a follow-up (see doStartSpin etc.), the loop just resumes
+  // from there.
+  socket.on('set_auto_moderator', async (data, ack) => {
+    const reply = (res) => { if (typeof ack === 'function') ack(res); };
+    const enabled = !!(data && data.enabled);
+
+    if (!enabled) {
+      autoModeratorEnabled = false;
+      clearAutoModeratorTimer();
+      broadcast();
+      reply({ ok: true });
+      return;
+    }
+
+    const token = await getValidToken();
+    if (!token) {
+      reply({ ok: false, message: 'Spotify muss verbunden sein, damit der automatische Moderator Songs auswählen kann.' });
+      return;
+    }
+
+    if (typeof data.playlist === 'number' && SPOTIFY_PLAYLISTS[data.playlist]) {
+      autoModeratorPlaylist = data.playlist;
+    }
+    autoModeratorEnabled = true;
+    autoModeratorRetries = 0;
     broadcast();
+    reply({ ok: true });
+
+    // Resume the loop from wherever the game currently stands.
+    clearAutoModeratorTimer();
+    if (gameState === 'lobby' || gameState === 'between_rounds') {
+      scheduleAuto(doStartSpin, 1500);
+    } else if (gameState === 'spinning') {
+      scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
+    } else if (gameState === 'revealing') {
+      scheduleAuto(doNextRound, AUTO_REVEAL_DURATION_MS);
+    }
+    // gameState === 'playing': the running timer's own zero-check already
+    // schedules doRevealSolution once it hits 0, nothing to do here.
   });
 
   socket.on('mark_correct', (data) => {
@@ -683,42 +884,18 @@ io.on('connection', (socket) => {
   });
 
   socket.on('redraw_category', () => {
-    clearTimer();
-    spinToken++;
-    currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
-    currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
-    currentSong = null;
-    answers.clear();
-    gameState = 'spinning';
-    io.emit('spotify_pause');
-    broadcast();
+    clearAutoModeratorTimer();
+    doRedrawCategory();
   });
 
   socket.on('next_round', () => {
-    currentRound++;
-    currentCategory = null;
-    currentMysterySub = null;
-    currentSong = null;
-    answers.clear();
-    gameState = 'between_rounds';
-    broadcast();
+    clearAutoModeratorTimer();
+    doNextRound();
   });
 
   socket.on('reset_game', () => {
-    clearTimer();
-    currentRound = 0;
-    currentCategory = null;
-    currentMysterySub = null;
-    currentSong = null;
-    answers.clear();
-    gameState = 'lobby';
-    for (const [, team] of teams) {
-      team.bingoCard = generateBingoCard();
-      team.score = 0;
-      team.hasBingo = false;
-    }
-    io.emit('spotify_pause');
-    broadcast();
+    clearAutoModeratorTimer();
+    doResetGame();
   });
 
   socket.on('disconnect', () => {

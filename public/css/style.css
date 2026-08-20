@@ -346,6 +346,52 @@ h1, h2, h3, h4 {
 .emoji-btn.taken { opacity: .3; cursor: not-allowed; filter: grayscale(1); }
 .emoji-btn.taken:hover { border-color: var(--border); background: var(--surface); transform: none; }
 
+/* Toggle switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 52px;
+  height: 30px;
+  flex-shrink: 0;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--surface-light);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background .25s, border-color .25s;
+}
+.switch-slider::before {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  left: 3px;
+  top: 3px;
+  background: var(--text-dim);
+  border-radius: 50%;
+  transition: transform .25s, background .25s;
+}
+.switch input:checked + .switch-slider {
+  background: rgba(6,214,160,.25);
+  border-color: var(--green);
+}
+.switch input:checked + .switch-slider::before {
+  transform: translateX(22px);
+  background: var(--green);
+  box-shadow: 0 0 10px var(--green);
+}
+.switch input:focus-visible + .switch-slider {
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
 /* Connection indicator */
 .conn {
   position: fixed;

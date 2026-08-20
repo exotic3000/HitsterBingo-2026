@@ -92,13 +92,16 @@
 
   const randomBtn = document.getElementById('btn-random-song');
   const playlistSelect = document.getElementById('select-playlist');
+  const autoPlaylistSelect = document.getElementById('select-auto-playlist');
 
   fetch('/api/spotify/playlists')
     .then((r) => r.json())
     .then((data) => {
-      playlistSelect.innerHTML = (data.playlists || [])
+      const options = (data.playlists || [])
         .map((p) => '<option value="' + p.index + '">' + p.name + '</option>')
         .join('');
+      playlistSelect.innerHTML = options;
+      autoPlaylistSelect.innerHTML = options;
     })
     .catch(() => {});
 
@@ -149,6 +152,33 @@
   if (btnToggle) {
     btnToggle.addEventListener('click', toggleManual);
   }
+
+  // ── Automatischer Moderator ───────────────────────────────────
+
+  let autoModeratorEnabled = false;
+  const autoToggle = document.getElementById('auto-moderator-toggle');
+  const autoSettingsEl = document.getElementById('auto-moderator-settings');
+  const autoStatusEl = document.getElementById('auto-moderator-status');
+
+  autoToggle.addEventListener('change', () => {
+    const enabled = autoToggle.checked;
+    autoToggle.disabled = true;
+    socket.emit('set_auto_moderator', {
+      enabled,
+      playlist: parseInt(autoPlaylistSelect.value || '0'),
+    }, (res) => {
+      autoToggle.disabled = false;
+      if (!res || !res.ok) {
+        autoToggle.checked = false;
+        alert((res && res.message) || 'Automatischer Moderator konnte nicht aktiviert werden.');
+      }
+    });
+  });
+
+  socket.on('auto_moderator_stopped', (data) => {
+    autoToggle.checked = false;
+    alert('Automatischer Moderator wurde gestoppt: ' + ((data && data.reason) || 'Unbekannter Fehler'));
+  });
 
   // ── Control actions (shared by buttons and keyboard shortcuts) ──
 
@@ -268,24 +298,40 @@
       link.textContent = 'Verbinden';
     }
 
-    // Controls
+    // Automatischer Moderator
+    autoModeratorEnabled = !!state.autoModeratorEnabled;
+    autoToggle.checked = autoModeratorEnabled;
+    if (typeof state.autoModeratorPlaylist === 'number') {
+      autoPlaylistSelect.value = String(state.autoModeratorPlaylist);
+    }
+    autoSettingsEl.classList.toggle('hidden', autoModeratorEnabled);
+    autoStatusEl.classList.toggle('hidden', !autoModeratorEnabled);
+    if (autoModeratorEnabled) {
+      autoStatusEl.textContent = '🤖 Automatischer Moderator läuft — Runde ' + (state.currentRound + 1) + '. Die Steuerung unten übernimmt der Server.';
+    }
+
+    // Controls — the automatic moderator drives these itself, so hide the
+    // manual round controls while it's running (Reset stays available in
+    // case the host wants to stop everything by hand).
     controlsEl.innerHTML = '';
-    if (gs === 'lobby' || gs === 'between_rounds') {
-      controlsEl.appendChild(makeBtn('Drehen (D)', 'btn-primary', doSpin));
-    }
-    if (gs === 'spinning' || gs === 'playing' || gs === 'revealing') {
-      controlsEl.appendChild(makeBtn('Kategorie neu drehen (K)', 'btn-secondary', doRedrawCategory));
-    }
-    if (gs === 'playing') {
-      controlsEl.appendChild(makeBtn('Lösung zeigen (L)', 'btn-danger', doRevealSolution));
-    }
-    if (gs === 'revealing') {
-      controlsEl.appendChild(makeBtn('Nächste Runde (N)', 'btn-primary', doNextRound));
+    if (!autoModeratorEnabled) {
+      if (gs === 'lobby' || gs === 'between_rounds') {
+        controlsEl.appendChild(makeBtn('Drehen (D)', 'btn-primary', doSpin));
+      }
+      if (gs === 'spinning' || gs === 'playing' || gs === 'revealing') {
+        controlsEl.appendChild(makeBtn('Kategorie neu drehen (K)', 'btn-secondary', doRedrawCategory));
+      }
+      if (gs === 'playing') {
+        controlsEl.appendChild(makeBtn('Lösung zeigen (L)', 'btn-danger', doRevealSolution));
+      }
+      if (gs === 'revealing') {
+        controlsEl.appendChild(makeBtn('Nächste Runde (N)', 'btn-primary', doNextRound));
+      }
     }
     controlsEl.appendChild(makeBtn('Reset (R)', 'btn-secondary', doReset));
 
     // Song form
-    if (gs === 'spinning') {
+    if (gs === 'spinning' && !autoModeratorEnabled) {
       show('song-form');
       document.getElementById('ctrl-category').innerHTML = categoryBadgeHTML(state.currentCategory, state.currentMysterySub);
 
