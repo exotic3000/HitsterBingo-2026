@@ -4,16 +4,21 @@
   const sectionsEl = document.getElementById('room-sections');
   const emptyEl = document.getElementById('room-list-empty');
   const createBtn = document.getElementById('btn-create-room');
+  const overlay = document.getElementById('create-room-overlay');
+  const createForm = document.getElementById('create-room-form');
+  const cancelBtn = document.getElementById('btn-cancel-room');
   const nameInput = document.getElementById('input-room-name');
 
-  // Same cards/copy as the original single-game home screen — just repeated
-  // once per room now, with the room code appended to each link.
+  // Compact — one small pill link per view instead of the big illustrated
+  // cards, since those get cramped fast once several rounds are running side
+  // by side. The big cards are still what a round's own views (moderator,
+  // etc.) use; this is just the launcher list.
   const VIEWS = [
-    { icon: '🖥️', label: 'Beamer-Ansicht', desc: 'Drehrad, Timer &amp; Lösung für die Leinwand', path: '/display.html' },
-    { icon: '🎙️', label: 'Moderation', desc: 'Spielsteuerung, Antworten &amp; Bingokarten', path: '/moderator.html' },
-    { icon: '📱', label: 'Team erstellen', desc: 'Antworten eingeben &amp; Bingokarte sehen', path: '/team.html' },
-    { icon: '📷', label: 'QR-Code', desc: 'Beitritts-Code zum Scannen, separat anzeigbar', path: '/qr.html' },
-    { icon: '🏆', label: 'Übersicht', desc: 'Alle Bingokarten, Rangliste &amp; Runde auf einen Blick', path: '/overview.html' },
+    { icon: '🖥️', label: 'Beamer', path: '/display.html' },
+    { icon: '🎙️', label: 'Moderation', path: '/moderator.html' },
+    { icon: '📱', label: 'Team', path: '/team.html' },
+    { icon: '📷', label: 'QR-Code', path: '/qr.html' },
+    { icon: '🏆', label: 'Übersicht', path: '/overview.html' },
   ];
 
   const STATE_LABELS = {
@@ -45,52 +50,63 @@
       return;
     }
     emptyEl.classList.add('hidden');
-    sectionsEl.innerHTML = rooms.map(roomSectionHTML).join('');
+    sectionsEl.innerHTML = rooms.map(roomCardHTML).join('');
 
     sectionsEl.querySelectorAll('[data-delete]').forEach((btn) => {
       btn.addEventListener('click', () => deleteRoom(btn.dataset.delete));
     });
   }
 
-  function roomSectionHTML(room) {
-    const cards = VIEWS.map((v) =>
-      '<a href="' + v.path + '?room=' + encodeURIComponent(room.roomCode) + '" target="_blank" rel="noopener" class="card home-card">' +
-        '<div class="icon">' + v.icon + '</div>' +
-        '<h3>' + v.label + '</h3>' +
-        '<p>' + v.desc + '</p>' +
-      '</a>'
+  function roomCardHTML(room) {
+    const links = VIEWS.map((v) =>
+      '<a href="' + v.path + '?room=' + encodeURIComponent(room.roomCode) + '" target="_blank" rel="noopener" ' +
+      'class="btn btn-secondary" style="font-size:.75rem;padding:.4rem .7rem">' + v.icon + ' ' + v.label + '</a>'
     ).join('');
 
     const title = room.roomName
-      ? escapeHtml(room.roomName) + ' <span style="font-size:.85rem;color:var(--text-dim);font-weight:normal;letter-spacing:.1em">(' + room.roomCode + ')</span>'
+      ? escapeHtml(room.roomName) + ' <span style="font-size:.75rem;color:var(--text-dim);font-weight:normal">(' + room.roomCode + ')</span>'
       : room.roomCode;
 
-    return '<div style="max-width:800px;margin:0 auto 3rem">' +
+    return '<div class="card mb" style="max-width:800px;margin-left:auto;margin-right:auto">' +
       '<div class="flex justify-between items-center mb">' +
         '<div>' +
-          '<span style="font-family:var(--font-display);font-size:1.3rem;letter-spacing:.05em">' + title + '</span>' +
-          '<span style="font-size:.8rem;color:var(--text-dim);margin-left:.75rem">' +
+          '<span style="font-family:var(--font-display);font-size:1.05rem;letter-spacing:.05em">' + title + '</span>' +
+          '<div style="font-size:.75rem;color:var(--text-dim)">' +
             room.teamCount + ' Team' + (room.teamCount !== 1 ? 's' : '') + ' · ' + (STATE_LABELS[room.gameState] || room.gameState) +
-          '</span>' +
+          '</div>' +
         '</div>' +
-        '<button class="btn btn-secondary" data-delete="' + room.roomCode + '" style="font-size:.75rem;padding:.4rem .8rem">Runde beenden</button>' +
+        '<button class="btn btn-secondary" data-delete="' + room.roomCode + '" style="font-size:.7rem;padding:.35rem .6rem">Beenden</button>' +
       '</div>' +
-      '<div class="home-grid">' + cards + '</div>' +
+      '<div class="flex gap-sm flex-wrap">' + links + '</div>' +
     '</div>';
   }
 
-  async function createRoom() {
-    createBtn.disabled = true;
+  // ── Create-room dialog ────────────────────────────────────────
+
+  function openCreateDialog() {
+    nameInput.value = '';
+    overlay.classList.remove('hidden');
+    nameInput.focus();
+  }
+
+  function closeCreateDialog() {
+    overlay.classList.add('hidden');
+  }
+
+  async function createRoom(e) {
+    e.preventDefault();
+    const submitBtn = createForm.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
     try {
       await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: nameInput.value.trim() }),
       });
-      nameInput.value = '';
+      closeCreateDialog();
       await loadRooms();
     } finally {
-      createBtn.disabled = false;
+      submitBtn.disabled = false;
     }
   }
 
@@ -100,10 +116,14 @@
     await loadRooms();
   }
 
-  createBtn.addEventListener('click', createRoom);
-  nameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') createRoom();
+  createBtn.addEventListener('click', openCreateDialog);
+  cancelBtn.addEventListener('click', closeCreateDialog);
+  createForm.addEventListener('submit', createRoom);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCreateDialog(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeCreateDialog();
   });
+
   loadRooms();
   setInterval(loadRooms, 10000);
 })();

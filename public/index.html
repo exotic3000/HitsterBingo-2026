@@ -18,14 +18,24 @@
 
     <div class="flex justify-between items-center gap-sm flex-wrap mb" style="max-width:800px;margin:0 auto 2rem">
       <h2 style="font-size:1rem;margin:0;color:var(--text-dim)">Aktive Runden</h2>
-      <div class="flex gap-sm">
-        <input id="input-room-name" class="input" placeholder="Rundenname (optional)" style="width:200px">
-        <button id="btn-create-room" class="btn btn-primary">+ Neue Runde erstellen</button>
-      </div>
+      <button id="btn-create-room" class="btn btn-primary">+ Neue Runde erstellen</button>
     </div>
 
     <div id="room-sections"></div>
     <p id="room-list-empty" class="subtitle hidden" style="text-align:center;margin-top:2rem">Noch keine Runde erstellt — leg oben eine neue an.</p>
+  </div>
+
+  <!-- Neue-Runde-Dialog -->
+  <div id="create-room-overlay" class="hidden" style="position:fixed;inset:0;z-index:100;background:rgba(10,14,39,.75);display:flex;align-items:center;justify-content:center;padding:1rem">
+    <form id="create-room-form" class="card" style="width:100%;max-width:360px">
+      <h3 style="margin-bottom:1rem">Neue Runde erstellen</h3>
+      <label for="input-room-name" style="display:block;font-size:.75rem;color:var(--text-dim);margin-bottom:.35rem">Rundenname (optional)</label>
+      <input id="input-room-name" class="input w-full" placeholder="z. B. Gruppe Falken" autofocus>
+      <div class="flex gap-sm mt">
+        <button type="button" id="btn-cancel-room" class="btn btn-secondary" style="flex:1">Abbrechen</button>
+        <button type="submit" class="btn btn-primary" style="flex:1">Erstellen</button>
+      </div>
+    </form>
   </div>
 
   <script src="/js/index.js"></script>
