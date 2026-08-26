@@ -442,6 +442,7 @@
   var lastSpinState = null;
 
   socket.on('game_state', function(state) {
+    renderRoomBadge(state);
     categories = state.categories || [];
     var teams = Object.values(state.teams);
     var gs = state.gameState;

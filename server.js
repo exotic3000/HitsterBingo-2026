@@ -276,8 +276,12 @@ function generateRoomCode() {
 // Encapsulates one room's entire game state as closures — a direct,
 // mechanical move of what used to be this file's module-level game state
 // and do*() functions, just scoped per room instead of shared globally.
-function createSession(roomCode) {
+function createSession(roomCode, name) {
   const createdAt = Date.now();
+  // Optional human-friendly label (e.g. "Gruppe Falken") so organizers can
+  // tell rounds apart at a glance instead of comparing random codes — purely
+  // cosmetic, the room code stays the actual identifier used in URLs/links.
+  const roomName = (typeof name === 'string' ? name.trim() : '').slice(0, 40);
 
   const teams = new Map();
   const answers = new Map();
@@ -373,6 +377,7 @@ function createSession(roomCode) {
   function getFullState() {
     return {
       roomCode,
+      roomName,
       gameState,
       teams: Object.fromEntries(teams),
       currentRound,
@@ -742,6 +747,7 @@ function createSession(roomCode) {
 
   return {
     roomCode,
+    roomName,
     createdAt,
     teams,
     get gameState() { return gameState; },
@@ -788,13 +794,16 @@ setInterval(() => {
 
 app.post('/api/rooms', (req, res) => {
   const roomCode = generateRoomCode();
-  sessions.set(roomCode, createSession(roomCode));
-  res.json({ roomCode });
+  const name = req.body && req.body.name;
+  const session = createSession(roomCode, name);
+  sessions.set(roomCode, session);
+  res.json({ roomCode, roomName: session.roomName });
 });
 
 app.get('/api/rooms', (req, res) => {
   const rooms = [...sessions.values()].map((s) => ({
     roomCode: s.roomCode,
+    roomName: s.roomName,
     createdAt: s.createdAt,
     teamCount: s.teams.size,
     gameState: s.gameState,

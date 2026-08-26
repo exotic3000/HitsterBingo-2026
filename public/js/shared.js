@@ -12,6 +12,14 @@ const CAT_MAP = {
 
 /* ── Room code ──────────────────────────────────────────────── */
 
+// Fills a page's #room-badge (if present) from a game_state payload, so
+// operators can tell which round a tab belongs to when several are open.
+function renderRoomBadge(state) {
+  const el = document.getElementById('room-badge');
+  if (!el) return;
+  el.textContent = state.roomName ? state.roomName + ' (' + state.roomCode + ')' : (state.roomCode || '');
+}
+
 function getRoomCode() {
   return new URLSearchParams(location.search).get('room') || '';
 }

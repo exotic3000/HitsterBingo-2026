@@ -4,6 +4,7 @@
   const sectionsEl = document.getElementById('room-sections');
   const emptyEl = document.getElementById('room-list-empty');
   const createBtn = document.getElementById('btn-create-room');
+  const nameInput = document.getElementById('input-room-name');
 
   // Same cards/copy as the original single-game home screen — just repeated
   // once per room now, with the room code appended to each link.
@@ -22,6 +23,14 @@
     revealing: 'Auflösung',
     between_rounds: 'Zwischen Runden',
   };
+
+  // Room names are free-text from the organizer — escape before dropping
+  // into innerHTML so a name can't inject markup/script.
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
 
   async function loadRooms() {
     const resp = await fetch('/api/rooms');
@@ -52,10 +61,14 @@
       '</a>'
     ).join('');
 
+    const title = room.roomName
+      ? escapeHtml(room.roomName) + ' <span style="font-size:.85rem;color:var(--text-dim);font-weight:normal;letter-spacing:.1em">(' + room.roomCode + ')</span>'
+      : room.roomCode;
+
     return '<div style="max-width:800px;margin:0 auto 3rem">' +
       '<div class="flex justify-between items-center mb">' +
         '<div>' +
-          '<span style="font-family:var(--font-display);font-size:1.3rem;letter-spacing:.15em">' + room.roomCode + '</span>' +
+          '<span style="font-family:var(--font-display);font-size:1.3rem;letter-spacing:.05em">' + title + '</span>' +
           '<span style="font-size:.8rem;color:var(--text-dim);margin-left:.75rem">' +
             room.teamCount + ' Team' + (room.teamCount !== 1 ? 's' : '') + ' · ' + (STATE_LABELS[room.gameState] || room.gameState) +
           '</span>' +
@@ -69,7 +82,12 @@
   async function createRoom() {
     createBtn.disabled = true;
     try {
-      await fetch('/api/rooms', { method: 'POST' });
+      await fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nameInput.value.trim() }),
+      });
+      nameInput.value = '';
       await loadRooms();
     } finally {
       createBtn.disabled = false;
@@ -83,6 +101,9 @@
   }
 
   createBtn.addEventListener('click', createRoom);
+  nameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createRoom();
+  });
   loadRooms();
   setInterval(loadRooms, 10000);
 })();

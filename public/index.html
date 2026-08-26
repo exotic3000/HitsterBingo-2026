@@ -16,9 +16,12 @@
       <p class="subtitle">Space Edition — Rundenverwaltung</p>
     </div>
 
-    <div class="flex justify-between items-center mb" style="max-width:800px;margin:0 auto 2rem">
+    <div class="flex justify-between items-center gap-sm flex-wrap mb" style="max-width:800px;margin:0 auto 2rem">
       <h2 style="font-size:1rem;margin:0;color:var(--text-dim)">Aktive Runden</h2>
-      <button id="btn-create-room" class="btn btn-primary">+ Neue Runde erstellen</button>
+      <div class="flex gap-sm">
+        <input id="input-room-name" class="input" placeholder="Rundenname (optional)" style="width:200px">
+        <button id="btn-create-room" class="btn btn-primary">+ Neue Runde erstellen</button>
+      </div>
     </div>
 
     <div id="room-sections"></div>

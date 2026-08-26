@@ -7,6 +7,7 @@
   const timerEl = document.getElementById('timer');
 
   socket.on('game_state', (state) => {
+    renderRoomBadge(state);
     const gs = state.gameState;
     const teams = Object.values(state.teams);
     const sorted = [...teams].sort((a, b) => b.score - a.score);

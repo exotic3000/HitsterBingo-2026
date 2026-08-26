@@ -278,6 +278,7 @@
   // ── Game state rendering ───────────────────────────────────────
 
   socket.on('game_state', (state) => {
+    renderRoomBadge(state);
     const gs = state.gameState;
     currentGameState = gs;
     const teams = Object.values(state.teams);
