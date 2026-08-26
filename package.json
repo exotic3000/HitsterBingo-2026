@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\""
   },
   "dependencies": {
     "express": "^5.2.1",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.0",
     "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
   }
 }

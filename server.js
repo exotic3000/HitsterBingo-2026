@@ -154,8 +154,9 @@ const TEAM_DISCONNECT_GRACE_MS = 450000;
 // Also drop a room's Spotify connection once nobody has any tab of that
 // room open at all. A short grace period tolerates a page reload or brief
 // network hiccup (same pattern as team reconnects) without forcing a fresh
-// Spotify login mid-show.
-const SPOTIFY_DISCONNECT_GRACE_MS = 20000;
+// Spotify login mid-show. Overridable so tests don't have to sit through
+// the real 20s to verify the behavior.
+const SPOTIFY_DISCONNECT_GRACE_MS = Number(process.env.SPOTIFY_DISCONNECT_GRACE_MS) || 20000;
 
 // ── Helper Functions (stateless, shared by every room) ───────────
 
@@ -831,7 +832,9 @@ function createSession(roomCode, name, restore) {
 // state — deliberately never Spotify tokens, see createSession) means the
 // worst case is losing the last ~30s of progress instead of the whole event.
 
-const SNAPSHOT_FILE = path.join(__dirname, '.rooms-snapshot.json');
+// Overridable so parallel test runs (each spawning their own server) don't
+// clobber each other's or the real dev snapshot on disk.
+const SNAPSHOT_FILE = process.env.SNAPSHOT_FILE || path.join(__dirname, '.rooms-snapshot.json');
 const SNAPSHOT_INTERVAL_MS = 30000;
 
 function snapshotSessions() {
@@ -1015,6 +1018,19 @@ function requireSession(req, res) {
     return null;
   }
   return session;
+}
+
+// Test-only seam: real Spotify OAuth needs a live account, which tests
+// don't have — this lets the disconnect-on-empty-room test put a room into
+// a "connected" state without one. Only registered when a test explicitly
+// opts in, so it doesn't exist as a route at all in normal/production runs.
+if (process.env.ENABLE_TEST_HOOKS === '1') {
+  app.post('/api/test/seed-spotify-token/:room', (req, res) => {
+    const session = sessions.get(req.params.room);
+    if (!session) return res.status(404).json({ error: 'Unbekannte Runde' });
+    session.setSpotifyTokens('test-fake-access-token', 'test-fake-refresh-token', 3600);
+    res.json({ ok: true });
+  });
 }
 
 // Spotify API proxy: the client gets the token to init the Web Playback SDK
