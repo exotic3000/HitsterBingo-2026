@@ -98,11 +98,15 @@
     const submitBtn = createForm.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
     try {
-      await fetch('/api/rooms', {
+      const resp = await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: nameInput.value.trim() }),
       });
+      if (resp.status === 401) {
+        alert('Sitzung abgelaufen — bitte Seite neu laden und erneut einloggen.');
+        return;
+      }
       closeCreateDialog();
       await loadRooms();
     } finally {
@@ -112,7 +116,11 @@
 
   async function deleteRoom(roomCode) {
     if (!confirm('Runde ' + roomCode + ' wirklich beenden? Alle Teams werden getrennt.')) return;
-    await fetch('/api/rooms/' + encodeURIComponent(roomCode), { method: 'DELETE' });
+    const resp = await fetch('/api/rooms/' + encodeURIComponent(roomCode), { method: 'DELETE' });
+    if (resp.status === 401) {
+      alert('Sitzung abgelaufen — bitte Seite neu laden und erneut einloggen.');
+      return;
+    }
     await loadRooms();
   }
 

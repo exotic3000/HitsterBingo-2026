@@ -45,6 +45,14 @@ function isAuthenticated(req) {
   return parseCookies(req)[AUTH_COOKIE] === AUTH_TOKEN;
 }
 
+// Guards API routes that change/destroy shared state (creating or closing a
+// round) — unlike the page gate above, most of /api/* stays intentionally
+// open (e.g. GET /api/rooms, used by the unauthenticated join.html picker).
+function requireAuth(req, res, next) {
+  if (isAuthenticated(req)) return next();
+  res.status(401).json({ error: 'Nicht angemeldet' });
+}
+
 app.use((req, res, next) => {
   if (!PROTECTED_PAGES.has(req.path) || isAuthenticated(req)) return next();
   // originalUrl (not path) so a `?room=` on the requested page survives the
@@ -794,7 +802,7 @@ setInterval(() => {
 
 // ── Room management API ───────────────────────────────────────────
 
-app.post('/api/rooms', (req, res) => {
+app.post('/api/rooms', requireAuth, (req, res) => {
   const roomCode = generateRoomCode();
   const name = req.body && req.body.name;
   const session = createSession(roomCode, name);
@@ -813,7 +821,7 @@ app.get('/api/rooms', (req, res) => {
   res.json({ rooms });
 });
 
-app.delete('/api/rooms/:code', (req, res) => {
+app.delete('/api/rooms/:code', requireAuth, (req, res) => {
   const session = sessions.get(req.params.code);
   if (!session) return res.status(404).json({ error: 'Runde nicht gefunden' });
   session.close();
