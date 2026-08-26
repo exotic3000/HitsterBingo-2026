@@ -24,8 +24,10 @@ const AUTH_TOKEN = crypto.createHmac('sha256', SESSION_SECRET).update('authentic
 
 const PROTECTED_PAGES = new Set([
   '/', '/index.html', '/display.html', '/moderator.html',
-  '/overview.html', '/qr.html',
+  '/overview.html', '/qr.html', '/join-qr.html',
 ]);
+// join.html is deliberately NOT protected — same reasoning as team.html:
+// players reach it straight from a scanned QR code, without the site password.
 
 function parseCookies(req) {
   const header = req.headers.cookie;
@@ -821,16 +823,21 @@ app.delete('/api/rooms/:code', (req, res) => {
 
 // ── Join QR code ────────────────────────────────────────────────
 
+// Without `room`, generates a QR for the generic /join.html picker instead
+// of a specific round — same code scanned all event long, the player picks
+// their round on the page itself instead of the code being baked into the link.
 app.get('/api/join-qr', async (req, res) => {
   const roomCode = req.query.room;
-  if (!roomCode || !sessions.has(roomCode)) {
+  if (roomCode && !sessions.has(roomCode)) {
     return res.status(404).json({ error: 'Unbekannte Runde' });
   }
   try {
-    const joinUrl = PUBLIC_BASE_URL + '/team.html?room=' + encodeURIComponent(roomCode);
+    const joinUrl = roomCode
+      ? PUBLIC_BASE_URL + '/team.html?room=' + encodeURIComponent(roomCode)
+      : PUBLIC_BASE_URL + '/join.html';
     const png = await QRCode.toBuffer(joinUrl, { width: 400, margin: 1 });
     res.set('Content-Type', 'image/png');
-    res.set('Cache-Control', 'no-store');
+    res.set('Cache-Control', roomCode ? 'no-store' : 'public, max-age=3600');
     res.send(png);
   } catch (err) {
     res.status(500).json({ error: 'QR generation failed' });

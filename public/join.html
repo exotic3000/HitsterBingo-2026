@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beitreten — Hitster Bingo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="page flex flex-col items-center justify-center" style="min-height:100vh">
+    <h1 class="page-title" style="font-size:2.5rem;margin-bottom:.5rem">Hitster Bingo</h1>
+    <p class="subtitle">Welcher Runde willst du beitreten?</p>
+
+    <div class="card" style="width:100%;max-width:400px">
+      <label for="input-code" style="display:block;font-size:.8rem;color:var(--text-dim);margin-bottom:.5rem">Rundencode oder Rundenname</label>
+      <input id="input-code" class="input w-full" placeholder="z. B. Gruppe Falken oder 43HFA" autofocus autocomplete="off">
+
+      <div id="results" class="mt"></div>
+      <p id="hint" style="color:var(--text-dim);font-size:.8rem;margin-top:.75rem;text-align:center">Tippen, um passende Runden zu sehen</p>
+      <p id="empty-msg" class="hidden" style="color:var(--text-dim);font-size:.85rem;margin-top:.75rem;text-align:center">Keine passende Runde gefunden.</p>
+    </div>
+  </div>
+
+  <script src="/js/join.js"></script>
+</body>
+</html>
