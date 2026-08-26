@@ -286,28 +286,36 @@ function generateRoomCode() {
 // Encapsulates one room's entire game state as closures — a direct,
 // mechanical move of what used to be this file's module-level game state
 // and do*() functions, just scoped per room instead of shared globally.
-function createSession(roomCode, name) {
-  const createdAt = Date.now();
+// `restore` (from a disk snapshot after a crash/restart) carries over the
+// previous game progress for the same room code — teams, scores, round
+// state — everything except Spotify tokens (deliberately never persisted,
+// see the Spotify section below) and live socket/timer bookkeeping, which
+// gets rebuilt naturally as clients reconnect.
+function createSession(roomCode, name, restore) {
+  const createdAt = (restore && restore.createdAt) || Date.now();
   // Optional human-friendly label (e.g. "Gruppe Falken") so organizers can
   // tell rounds apart at a glance instead of comparing random codes — purely
   // cosmetic, the room code stays the actual identifier used in URLs/links.
-  const roomName = (typeof name === 'string' ? name.trim() : '').slice(0, 40);
+  const roomName = restore ? (restore.roomName || '') : (typeof name === 'string' ? name.trim() : '').slice(0, 40);
 
-  const teams = new Map();
-  const answers = new Map();
+  const teams = new Map(restore ? restore.teams : undefined);
+  const answers = new Map(restore ? restore.answers : undefined);
   const pendingTeamRemoval = new Map(); // teamId -> Timeout, cancelled on reconnect
-  let gameState = 'lobby';
-  let currentRound = 0;
-  let spinToken = 0;
-  let currentCategory = null;
-  let currentMysterySub = null;
-  let currentSong = null;
-  let timerValue = TIMER_SECONDS;
+  let gameState = (restore && restore.gameState) || 'lobby';
+  let currentRound = (restore && restore.currentRound) || 0;
+  let spinToken = (restore && restore.spinToken) || 0;
+  let currentCategory = (restore && restore.currentCategory) || null;
+  let currentMysterySub = (restore && restore.currentMysterySub) || null;
+  let currentSong = (restore && restore.currentSong) || null;
+  let timerValue = restore && typeof restore.timerValue === 'number' ? restore.timerValue : TIMER_SECONDS;
   let timerInterval = null;
 
   // ── Automatischer Moderator ─────────────────────────────────────
+  // Never auto-resumes after a restore — it needs a fresh Spotify
+  // connection anyway (tokens aren't persisted), so the moderator has to
+  // flip it back on manually. The playlist choice is kept as a convenience.
   let autoModeratorEnabled = false;
-  let autoModeratorPlaylist = 0;
+  let autoModeratorPlaylist = (restore && restore.autoModeratorPlaylist) || 0;
   let autoModeratorTimer = null;
   let autoModeratorRetries = 0;
   const AUTO_SPIN_REVEAL_MS = 9000;
@@ -755,6 +763,35 @@ function createSession(roomCode, name) {
     io.to('room:' + roomCode).emit('room_closed');
   }
 
+  // Everything needed to reconstruct this room after a restart — no Spotify
+  // tokens, no live socket/timer handles, just the game progress itself.
+  function snapshot() {
+    return {
+      roomCode,
+      roomName,
+      createdAt,
+      teams: [...teams.entries()],
+      answers: [...answers.entries()],
+      gameState,
+      currentRound,
+      spinToken,
+      currentCategory,
+      currentMysterySub,
+      currentSong,
+      timerValue,
+      autoModeratorPlaylist,
+    };
+  }
+
+  // A round mid-song when the crash happened resumes ticking down from the
+  // saved value once restored — the only piece of state that can't just sit
+  // there inert, since its progress lived in a setInterval that died with
+  // the process. Every other gameState is static and just gets served as-is
+  // to whoever reconnects next.
+  if (restore && gameState === 'playing') {
+    startTimer();
+  }
+
   return {
     roomCode,
     roomName,
@@ -765,6 +802,7 @@ function createSession(roomCode, name) {
     get lastEmptyAt() { return lastEmptyAt; },
     getFullState,
     broadcast,
+    snapshot,
     registerConnection,
     unregisterConnection,
     resolveTeamJoin,
@@ -787,17 +825,62 @@ function createSession(roomCode, name) {
   };
 }
 
+// ── Crash recovery ─────────────────────────────────────────────────
+// Everything lives in memory, so a crash or redeploy would otherwise wipe
+// every running round. A periodic snapshot to disk (teams, scores, round
+// state — deliberately never Spotify tokens, see createSession) means the
+// worst case is losing the last ~30s of progress instead of the whole event.
+
+const SNAPSHOT_FILE = path.join(__dirname, '.rooms-snapshot.json');
+const SNAPSHOT_INTERVAL_MS = 30000;
+
+function snapshotSessions() {
+  try {
+    const data = [...sessions.values()].map((s) => s.snapshot());
+    fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(data));
+  } catch (e) {
+    console.error('Snapshot fehlgeschlagen:', e.message);
+  }
+}
+
+function loadSnapshot() {
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(SNAPSHOT_FILE, 'utf8'));
+  } catch (e) {
+    return; // no snapshot yet — normal on first start
+  }
+  for (const roomData of data) {
+    sessions.set(roomData.roomCode, createSession(roomData.roomCode, roomData.roomName, roomData));
+  }
+  if (data.length) console.log('  ' + data.length + ' Runde(n) aus Snapshot wiederhergestellt (Spotify muss pro Runde neu verbunden werden)');
+}
+
+loadSnapshot();
+setInterval(snapshotSessions, SNAPSHOT_INTERVAL_MS);
+
+// Catch a clean redeploy/restart too, not just crashes.
+['SIGINT', 'SIGTERM'].forEach((sig) => {
+  process.on(sig, () => {
+    snapshotSessions();
+    process.exit(0);
+  });
+});
+
 // Removes rooms nobody has had open for a long time so a multi-day event
 // doesn't slowly accumulate abandoned sessions in memory.
 setInterval(() => {
   const now = Date.now();
+  let changed = false;
   for (const [code, session] of sessions) {
     if (session.connectedSocketCount === 0 && session.lastEmptyAt && now - session.lastEmptyAt > ROOM_EMPTY_TTL_MS) {
       session.close();
       sessions.delete(code);
+      changed = true;
       console.log('  Runde ' + code + ' wegen Inaktivität entfernt');
     }
   }
+  if (changed) snapshotSessions();
 }, 10 * 60 * 1000);
 
 // ── Room management API ───────────────────────────────────────────
@@ -807,6 +890,7 @@ app.post('/api/rooms', requireAuth, (req, res) => {
   const name = req.body && req.body.name;
   const session = createSession(roomCode, name);
   sessions.set(roomCode, session);
+  snapshotSessions();
   res.json({ roomCode, roomName: session.roomName });
 });
 
@@ -826,6 +910,7 @@ app.delete('/api/rooms/:code', requireAuth, (req, res) => {
   if (!session) return res.status(404).json({ error: 'Runde nicht gefunden' });
   session.close();
   sessions.delete(req.params.code);
+  snapshotSessions();
   res.json({ ok: true });
 });
 
