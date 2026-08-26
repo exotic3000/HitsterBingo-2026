@@ -1,16 +1,18 @@
 /* Rundenverwaltung — creates/lists/closes rooms, no socket connection needed */
 
 (function () {
-  const listEl = document.getElementById('room-list');
+  const sectionsEl = document.getElementById('room-sections');
   const emptyEl = document.getElementById('room-list-empty');
   const createBtn = document.getElementById('btn-create-room');
 
+  // Same cards/copy as the original single-game home screen — just repeated
+  // once per room now, with the room code appended to each link.
   const VIEWS = [
-    { icon: '🖥️', label: 'Beamer', path: '/display.html' },
-    { icon: '🎙️', label: 'Moderation', path: '/moderator.html' },
-    { icon: '📱', label: 'Team', path: '/team.html' },
-    { icon: '📷', label: 'QR-Code', path: '/qr.html' },
-    { icon: '🏆', label: 'Übersicht', path: '/overview.html' },
+    { icon: '🖥️', label: 'Beamer-Ansicht', desc: 'Drehrad, Timer &amp; Lösung für die Leinwand', path: '/display.html' },
+    { icon: '🎙️', label: 'Moderation', desc: 'Spielsteuerung, Antworten &amp; Bingokarten', path: '/moderator.html' },
+    { icon: '📱', label: 'Team erstellen', desc: 'Antworten eingeben &amp; Bingokarte sehen', path: '/team.html' },
+    { icon: '📷', label: 'QR-Code', desc: 'Beitritts-Code zum Scannen, separat anzeigbar', path: '/qr.html' },
+    { icon: '🏆', label: 'Übersicht', desc: 'Alle Bingokarten, Rangliste &amp; Runde auf einen Blick', path: '/overview.html' },
   ];
 
   const STATE_LABELS = {
@@ -29,35 +31,38 @@
 
   function renderRooms(rooms) {
     if (!rooms.length) {
-      listEl.innerHTML = '';
+      sectionsEl.innerHTML = '';
       emptyEl.classList.remove('hidden');
       return;
     }
     emptyEl.classList.add('hidden');
-    listEl.innerHTML = rooms.map(roomCardHTML).join('');
+    sectionsEl.innerHTML = rooms.map(roomSectionHTML).join('');
 
-    listEl.querySelectorAll('[data-delete]').forEach((btn) => {
+    sectionsEl.querySelectorAll('[data-delete]').forEach((btn) => {
       btn.addEventListener('click', () => deleteRoom(btn.dataset.delete));
     });
   }
 
-  function roomCardHTML(room) {
-    const links = VIEWS.map((v) =>
-      '<a href="' + v.path + '?room=' + encodeURIComponent(room.roomCode) + '" target="_blank" rel="noopener" ' +
-      'class="btn btn-secondary" style="font-size:.75rem;padding:.4rem .7rem">' + v.icon + ' ' + v.label + '</a>'
+  function roomSectionHTML(room) {
+    const cards = VIEWS.map((v) =>
+      '<a href="' + v.path + '?room=' + encodeURIComponent(room.roomCode) + '" target="_blank" rel="noopener" class="card home-card">' +
+        '<div class="icon">' + v.icon + '</div>' +
+        '<h3>' + v.label + '</h3>' +
+        '<p>' + v.desc + '</p>' +
+      '</a>'
     ).join('');
 
-    return '<div class="card mb">' +
+    return '<div style="max-width:800px;margin:0 auto 3rem">' +
       '<div class="flex justify-between items-center mb">' +
         '<div>' +
-          '<div style="font-family:var(--font-display);font-size:1.1rem;letter-spacing:.1em">' + room.roomCode + '</div>' +
-          '<div style="font-size:.75rem;color:var(--text-dim)">' +
+          '<span style="font-family:var(--font-display);font-size:1.3rem;letter-spacing:.15em">' + room.roomCode + '</span>' +
+          '<span style="font-size:.8rem;color:var(--text-dim);margin-left:.75rem">' +
             room.teamCount + ' Team' + (room.teamCount !== 1 ? 's' : '') + ' · ' + (STATE_LABELS[room.gameState] || room.gameState) +
-          '</div>' +
+          '</span>' +
         '</div>' +
-        '<button class="btn btn-secondary" data-delete="' + room.roomCode + '" style="font-size:.7rem;padding:.35rem .6rem">Beenden</button>' +
+        '<button class="btn btn-secondary" data-delete="' + room.roomCode + '" style="font-size:.75rem;padding:.4rem .8rem">Runde beenden</button>' +
       '</div>' +
-      '<div class="flex gap-sm flex-wrap">' + links + '</div>' +
+      '<div class="home-grid">' + cards + '</div>' +
     '</div>';
   }
 
