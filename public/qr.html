@@ -36,10 +36,20 @@
 <body>
   <div class="page qr-page">
     <h1 class="page-title" style="margin:0">Jetzt mitspielen!</h1>
-    <div class="qr-card">
-      <img src="/api/join-qr" alt="QR-Code zum Beitreten">
+    <div class="qr-card" id="qr-card">
+      <img id="qr-img" src="" alt="QR-Code zum Beitreten">
     </div>
     <p class="subtitle" style="margin:0">Scannen &amp; Team gründen</p>
   </div>
+
+  <script>
+    const room = new URLSearchParams(location.search).get('room');
+    if (room) {
+      document.getElementById('qr-img').src = '/api/join-qr?room=' + encodeURIComponent(room);
+    } else {
+      document.getElementById('qr-card').textContent = 'Keine Runde ausgewählt — bitte diesen Link über die Rundenübersicht öffnen.';
+      document.getElementById('qr-card').style.cssText += 'color:#0a0e27;font-size:1rem;max-width:360px;text-align:center;padding:2rem';
+    }
+  </script>
 </body>
 </html>

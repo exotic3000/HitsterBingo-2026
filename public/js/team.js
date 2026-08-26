@@ -2,7 +2,8 @@
 
 (function () {
   const socket = connectSocket();
-  const STORAGE_KEY = 'hitsterbingo_team_id';
+  // Scoped per room so a stale id from a different round never gets resumed.
+  const STORAGE_KEY = 'hitsterbingo_team_id_' + (getRoomCode() || 'none');
 
   let myTeamId = null;
   let selectedEmoji = '🚀';

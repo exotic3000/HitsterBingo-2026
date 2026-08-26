@@ -4,6 +4,9 @@
   const socket = connectSocket();
   socket.emit('join', { role: 'moderator' });
 
+  const roomCode = getRoomCode();
+  document.getElementById('spotify-link').href = '/auth/spotify?room=' + encodeURIComponent(roomCode);
+
   const controlsEl = document.getElementById('controls');
   let selectedSong = null;
   let searchTimeout = null;
@@ -29,7 +32,7 @@
     if (!q) return;
     resultsEl.innerHTML = '<p style="color:var(--text-dim);padding:.5rem">Suche...</p>';
     try {
-      const resp = await fetch('/api/spotify/search?q=' + encodeURIComponent(q));
+      const resp = await fetch('/api/spotify/search?room=' + encodeURIComponent(roomCode) + '&q=' + encodeURIComponent(q));
       const data = await resp.json();
       if (data.error) {
         resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">' + data.error + '</p>';
@@ -108,7 +111,7 @@
   async function doRandomSong() {
     resultsEl.innerHTML = '<p style="color:var(--text-dim);padding:.5rem">Wähle zufälligen Song...</p>';
     try {
-      const resp = await fetch('/api/spotify/playlist-random?playlist=' + playlistSelect.value);
+      const resp = await fetch('/api/spotify/playlist-random?room=' + encodeURIComponent(roomCode) + '&playlist=' + playlistSelect.value);
       const data = await resp.json();
       if (data.error) {
         resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">' + data.error + '</p>';

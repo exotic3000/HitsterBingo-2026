@@ -10,37 +10,21 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div class="page flex flex-col items-center justify-center" style="min-height:100vh">
-    <h1 class="page-title" style="font-size:2.5rem;margin-bottom:.5rem">Hitster Bingo</h1>
-    <p class="subtitle">Space Edition</p>
-
-    <div class="home-grid">
-      <a href="/display.html" target="_blank" rel="noopener" class="card home-card">
-        <div class="icon">🖥️</div>
-        <h3>Beamer-Ansicht</h3>
-        <p>Drehrad, Timer &amp; Lösung für die Leinwand</p>
-      </a>
-      <a href="/moderator.html" target="_blank" rel="noopener" class="card home-card">
-        <div class="icon">🎙️</div>
-        <h3>Moderation</h3>
-        <p>Spielsteuerung, Antworten &amp; Bingokarten</p>
-      </a>
-      <a href="/team.html" target="_blank" rel="noopener" class="card home-card">
-        <div class="icon">📱</div>
-        <h3>Team erstellen</h3>
-        <p>Antworten eingeben &amp; Bingokarte sehen</p>
-      </a>
-      <a href="/qr.html" target="_blank" rel="noopener" class="card home-card">
-        <div class="icon">📷</div>
-        <h3>QR-Code</h3>
-        <p>Beitritts-Code zum Scannen, separat anzeigbar</p>
-      </a>
-      <a href="/overview.html" target="_blank" rel="noopener" class="card home-card">
-        <div class="icon">🏆</div>
-        <h3>Übersicht</h3>
-        <p>Alle Bingokarten, Rangliste &amp; Runde auf einen Blick</p>
-      </a>
+  <div class="page">
+    <div class="flex flex-col items-center" style="margin-bottom:2rem">
+      <h1 class="page-title" style="font-size:2.5rem;margin-bottom:.5rem">Hitster Bingo</h1>
+      <p class="subtitle">Space Edition — Rundenverwaltung</p>
     </div>
+
+    <div class="flex justify-between items-center mb" style="max-width:650px;margin:0 auto 1rem">
+      <h2 style="font-size:1rem;margin:0">Aktive Runden</h2>
+      <button id="btn-create-room" class="btn btn-primary">+ Neue Runde erstellen</button>
+    </div>
+
+    <div id="room-list" style="max-width:650px;margin:0 auto"></div>
+    <p id="room-list-empty" class="subtitle hidden" style="text-align:center;margin-top:2rem">Noch keine Runde erstellt.</p>
   </div>
+
+  <script src="/js/index.js"></script>
 </body>
 </html>

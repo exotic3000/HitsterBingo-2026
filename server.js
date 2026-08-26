@@ -45,7 +45,9 @@ function isAuthenticated(req) {
 
 app.use((req, res, next) => {
   if (!PROTECTED_PAGES.has(req.path) || isAuthenticated(req)) return next();
-  res.redirect('/login.html?redirect=' + encodeURIComponent(req.path));
+  // originalUrl (not path) so a `?room=` on the requested page survives the
+  // login round-trip instead of dropping the moderator back into a room-less page.
+  res.redirect('/login.html?redirect=' + encodeURIComponent(req.originalUrl));
 });
 
 // Cloudflare rewrites the browser-facing Cache-Control for static assets to
@@ -97,21 +99,6 @@ app.post('/login', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Join QR code ────────────────────────────────────────────────
-// Fixed public URL (Cloudflare Tunnel) scanned from phones.
-const JOIN_URL = 'https://bingo.hitsterquizshow.de/team.html';
-
-app.get('/api/join-qr', async (req, res) => {
-  try {
-    const png = await QRCode.toBuffer(JOIN_URL, { width: 400, margin: 1 });
-    res.set('Content-Type', 'image/png');
-    res.set('Cache-Control', 'no-store');
-    res.send(png);
-  } catch (err) {
-    res.status(500).json({ error: 'QR generation failed' });
-  }
-});
-
 // ── Spotify Config ──────────────────────────────────────────────
 
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || 'f019a8aaafee49a99be7d0d50cfb3db4';
@@ -119,44 +106,16 @@ const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'b31d81165bba
 const PORT = process.env.PORT || 3000;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:' + PORT + '/auth/spotify/callback';
 
-// Playlists — Name + Spotify-URL/ID, wählbar in der Moderator-Ansicht.
+// Public base URL used to build the join-QR link — same origin players scan
+// from their phones, so it has to be the tunnel/public domain, not localhost.
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://bingo.hitsterquizshow.de';
+
+// Playlists — Name + Spotify-URL/ID, wählbar in der Moderator-Ansicht. Reine
+// Konfiguration, kein Geheimnis — bleibt bewusst global für alle Runden.
 const SPOTIFY_PLAYLISTS = [
   { name: 'Teenscamp HitsterGameshow 2026', url: 'https://open.spotify.com/playlist/5CF56knZKCMgpfOBz5r0S4?si=CKn55_V1SfGL6anks2hqVg&utm_source=whatsapp&pt=9764aed2b277e286ce2d298fa80145e1' },
   { name: 'Teenscamp Disse 2026', url : 'https://open.spotify.com/playlist/4RTxuCmYBccS5M6rhAWfMd?si=478a56b62e174378'}
 ];
-
-let spotifyAccessToken = null;
-let spotifyRefreshToken = null;
-let spotifyTokenExpiry = 0;
-
-// Persist tokens to disk so a server restart doesn't force re-login.
-const SPOTIFY_TOKEN_FILE = path.join(__dirname, '.spotify-token.json');
-
-function saveSpotifyTokens() {
-  try {
-    fs.writeFileSync(SPOTIFY_TOKEN_FILE, JSON.stringify({
-      accessToken: spotifyAccessToken,
-      refreshToken: spotifyRefreshToken,
-      expiry: spotifyTokenExpiry,
-    }));
-  } catch (e) {
-    console.error('Spotify-Token konnte nicht gespeichert werden:', e.message);
-  }
-}
-
-function loadSpotifyTokens() {
-  try {
-    const data = JSON.parse(fs.readFileSync(SPOTIFY_TOKEN_FILE, 'utf8'));
-    spotifyAccessToken = data.accessToken || null;
-    spotifyRefreshToken = data.refreshToken || null;
-    spotifyTokenExpiry = data.expiry || 0;
-    if (spotifyRefreshToken) console.log('  Spotify-Login aus .spotify-token.json wiederhergestellt');
-  } catch (e) {
-    // Keine gespeicherten Tokens vorhanden — normal beim ersten Start.
-  }
-}
-
-loadSpotifyTokens();
 
 // ── Game Constants ──────────────────────────────────────────────
 
@@ -177,67 +136,18 @@ const MYSTERY_SUBS = [
 ];
 
 // –– sehr wichtige Konstanten ––––––––––––––––––––––––––––––––––––
-const MAX_TEAMS = 10 ;
+const MAX_TEAMS = 10;
 const BINGO_SIZE = 5;
 const TIMER_SECONDS = 60;
 const TEAM_DISCONNECT_GRACE_MS = 450000;
 
-// ── Game State ──────────────────────────────────────────────────
+// Also drop a room's Spotify connection once nobody has any tab of that
+// room open at all. A short grace period tolerates a page reload or brief
+// network hiccup (same pattern as team reconnects) without forcing a fresh
+// Spotify login mid-show.
+const SPOTIFY_DISCONNECT_GRACE_MS = 20000;
 
-const teams = new Map();
-const answers = new Map();
-const pendingTeamRemoval = new Map(); // teamId -> Timeout, cancelled on reconnect
-let gameState = 'lobby';
-let currentRound = 0;
-let spinToken = 0;
-let currentCategory = null;
-let currentMysterySub = null;
-let currentSong = null;
-let timerValue = TIMER_SECONDS;
-let timerInterval = null;
-
-// ── Automatischer Moderator ─────────────────────────────────────
-// Lässt das Spiel ohne Bedienung durchlaufen (Drehen → Song → Timer →
-// Auflösung → nächste Runde → ...), damit der Host per Team-Handy
-// mitspielen kann, statt selbst zu moderieren. Teams haken ihre Karten
-// nach der Auflösung ohnehin schon selbst ab (siehe team.js), daher
-// genügt es, den Rundenablauf serverseitig zu automatisieren.
-let autoModeratorEnabled = false;
-let autoModeratorPlaylist = 0;
-let autoModeratorTimer = null;
-let autoModeratorRetries = 0;
-const AUTO_SPIN_REVEAL_MS = 9000;    // Zeit bis der Song nach dem Drehen automatisch gewählt & gestartet wird (Rad-Animation + Mystery-Auflösung)
-const AUTO_REVEAL_HOLD_MS = 1500;    // kurze Pause zwischen Timer-Ende und automatischer Lösungsanzeige
-const AUTO_REVEAL_DURATION_MS = 20000; // Zeit für die Teams, ihre Bingokarten nach der Lösung selbst abzuhaken
-const AUTO_BETWEEN_ROUNDS_MS = 5000; // Pause zwischen Runden, bevor automatisch neu gedreht wird
-const AUTO_RETRY_MS = 4000;          // Wiederholversuch, falls kein Song geladen werden konnte
-const AUTO_MAX_RETRIES = 5;
-
-function clearAutoModeratorTimer() {
-  if (autoModeratorTimer) {
-    clearTimeout(autoModeratorTimer);
-    autoModeratorTimer = null;
-  }
-}
-
-// Schedules the next auto-moderator step. Re-checks the flag at fire time
-// (not just now) so toggling auto mode off mid-wait reliably cancels it.
-function scheduleAuto(fn, delayMs) {
-  clearAutoModeratorTimer();
-  autoModeratorTimer = setTimeout(() => {
-    autoModeratorTimer = null;
-    if (autoModeratorEnabled) fn();
-  }, delayMs);
-}
-
-function stopAutoModerator(reason) {
-  autoModeratorEnabled = false;
-  clearAutoModeratorTimer();
-  if (reason) io.emit('auto_moderator_stopped', { reason });
-  broadcast();
-}
-
-// ── Helper Functions ────────────────────────────────────────────
+// ── Helper Functions (stateless, shared by every room) ───────────
 
 function shuffle(arr) {
   const a = [...arr];
@@ -311,160 +221,6 @@ function checkBingo(card) {
   return false;
 }
 
-function getFullState() {
-  return {
-    gameState,
-    teams: Object.fromEntries(teams),
-    currentRound,
-    spinToken,
-    currentCategory,
-    currentMysterySub,
-    currentSong,
-    answers: Object.fromEntries(answers),
-    timerValue,
-    categories: CATEGORIES,
-    spotifyReady: !!spotifyAccessToken,
-    autoModeratorEnabled,
-    autoModeratorPlaylist,
-  };
-}
-
-function broadcast() {
-  io.emit('game_state', getFullState());
-}
-
-function clearTimer() {
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
-  }
-}
-
-function startTimer() {
-  clearTimer();
-  timerInterval = setInterval(() => {
-    timerValue--;
-    io.emit('timer_tick', timerValue);
-    if (timerValue <= 0) {
-      clearTimer();
-      io.emit('spotify_pause');
-      broadcast();
-      if (autoModeratorEnabled) scheduleAuto(doRevealSolution, AUTO_REVEAL_HOLD_MS);
-    }
-  }, 1000);
-}
-
-// ── Spotify OAuth ───────────────────────────────────────────────
-
-app.get('/auth/spotify/debug', (req, res) => {
-  const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
-  const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
-    response_type: 'code',
-    client_id: SPOTIFY_CLIENT_ID,
-    scope: scopes,
-    redirect_uri: SPOTIFY_REDIRECT_URI,
-    show_dialog: true,
-  });
-  res.send('<html><body style="background:#0a0e27;color:#e0e6ff;font-family:monospace;padding:2rem">'
-    + '<h2 style="color:#4cc9f0">Spotify Debug</h2>'
-    + '<p><b>redirect_uri im Code:</b></p>'
-    + '<pre style="background:#131838;padding:1rem;border-radius:8px;user-select:all;color:#ffd60a">' + SPOTIFY_REDIRECT_URI + '</pre>'
-    + '<p style="margin-top:1rem">Kopiere die URI oben und trage sie <b>exakt so</b> im Spotify Dashboard ein.</p>'
-    + '<p style="margin-top:1rem"><a href="' + authUrl + '" style="color:#06d6a0">→ Weiter zu Spotify Auth</a></p>'
-    + '</body></html>');
-});
-
-app.get('/auth/spotify', (req, res) => {
-  if (!SPOTIFY_CLIENT_ID) {
-    return res.status(500).send('SPOTIFY_CLIENT_ID nicht gesetzt. Starte den Server mit: SPOTIFY_CLIENT_ID=xxx SPOTIFY_CLIENT_SECRET=yyy node server.js');
-  }
-  const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
-  const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
-    response_type: 'code',
-    client_id: SPOTIFY_CLIENT_ID,
-    scope: scopes,
-    redirect_uri: SPOTIFY_REDIRECT_URI,
-    show_dialog: true,
-  });
-  res.redirect(authUrl);
-});
-
-app.get('/auth/spotify/callback', async (req, res) => {
-  const { code, error } = req.query;
-  if (error) return res.send('Spotify Auth Fehler: ' + error);
-  if (!code) return res.send('Kein Code erhalten');
-
-  try {
-    const resp = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64'),
-      },
-      body: querystring.stringify({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: SPOTIFY_REDIRECT_URI,
-      }),
-    });
-    const data = await resp.json();
-    if (data.error) return res.send('Token-Fehler: ' + data.error_description);
-
-    spotifyAccessToken = data.access_token;
-    spotifyRefreshToken = data.refresh_token;
-    spotifyTokenExpiry = Date.now() + data.expires_in * 1000;
-    saveSpotifyTokens();
-
-    broadcast();
-    res.send('<html><body style="background:#0a0e27;color:#4cc9f0;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;font-size:1.5rem"><div style="text-align:center">✅ Spotify verbunden!<br><br><small style="color:#8892b0">Du kannst dieses Fenster schließen.</small></div></body></html>');
-  } catch (e) {
-    res.status(500).send('Fehler: ' + e.message);
-  }
-});
-
-async function refreshSpotifyToken() {
-  if (!spotifyRefreshToken) return false;
-  try {
-    const resp = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64'),
-      },
-      body: querystring.stringify({
-        grant_type: 'refresh_token',
-        refresh_token: spotifyRefreshToken,
-      }),
-    });
-    const data = await resp.json();
-    if (data.access_token) {
-      spotifyAccessToken = data.access_token;
-      spotifyTokenExpiry = Date.now() + data.expires_in * 1000;
-      if (data.refresh_token) spotifyRefreshToken = data.refresh_token;
-      saveSpotifyTokens();
-      return true;
-    }
-  } catch (e) {
-    console.error('Spotify token refresh failed:', e.message);
-  }
-  return false;
-}
-
-async function getValidToken() {
-  if (!spotifyAccessToken) return null;
-  if (Date.now() > spotifyTokenExpiry - 60000) {
-    await refreshSpotifyToken();
-  }
-  return spotifyAccessToken;
-}
-
-// Spotify API proxy: the client gets the token to init the Web Playback SDK
-app.get('/api/spotify/token', async (req, res) => {
-  const token = await getValidToken();
-  if (!token) return res.json({ token: null });
-  res.json({ token });
-});
-
 function mapTrack(t) {
   return {
     spotifyUri: t.uri,
@@ -487,8 +243,683 @@ function extractPlaylistId(input) {
   return null;
 }
 
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+// ── Rooms (one independent game each) ─────────────────────────────
+// Every group playing at the same time gets its own room: own teams, own
+// timer/round state, own auto-moderator loop, own Spotify login. A room is
+// never created implicitly (guessing a code never conjures a game) — only
+// via POST /api/rooms below.
+
+const sessions = new Map(); // roomCode -> session
+
+// Excludes visually-ambiguous characters (0/O, 1/I) since codes get read
+// off a screen and typed/scanned under time pressure.
+const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const ROOM_CODE_LENGTH = 5;
+const ROOM_EMPTY_TTL_MS = 6 * 60 * 60 * 1000; // auto-remove a room 6h after its last tab closed
+
+function generateRoomCode() {
+  let code;
+  do {
+    code = Array.from({ length: ROOM_CODE_LENGTH }, () =>
+      ROOM_CODE_ALPHABET[crypto.randomInt(ROOM_CODE_ALPHABET.length)]
+    ).join('');
+  } while (sessions.has(code));
+  return code;
+}
+
+// Encapsulates one room's entire game state as closures — a direct,
+// mechanical move of what used to be this file's module-level game state
+// and do*() functions, just scoped per room instead of shared globally.
+function createSession(roomCode) {
+  const createdAt = Date.now();
+
+  const teams = new Map();
+  const answers = new Map();
+  const pendingTeamRemoval = new Map(); // teamId -> Timeout, cancelled on reconnect
+  let gameState = 'lobby';
+  let currentRound = 0;
+  let spinToken = 0;
+  let currentCategory = null;
+  let currentMysterySub = null;
+  let currentSong = null;
+  let timerValue = TIMER_SECONDS;
+  let timerInterval = null;
+
+  // ── Automatischer Moderator ─────────────────────────────────────
+  let autoModeratorEnabled = false;
+  let autoModeratorPlaylist = 0;
+  let autoModeratorTimer = null;
+  let autoModeratorRetries = 0;
+  const AUTO_SPIN_REVEAL_MS = 9000;
+  const AUTO_REVEAL_HOLD_MS = 1500;
+  const AUTO_REVEAL_DURATION_MS = 20000;
+  const AUTO_BETWEEN_ROUNDS_MS = 5000;
+  const AUTO_RETRY_MS = 4000;
+  const AUTO_MAX_RETRIES = 5;
+
+  // ── Spotify (per room — a Spotify account can only play on one device
+  // at a time, so simultaneous rooms need independent logins) ─────
+  let spotifyAccessToken = null;
+  let spotifyRefreshToken = null;
+  let spotifyTokenExpiry = 0;
+  let connectedSocketCount = 0;
+  let spotifyDisconnectTimer = null;
+  let lastEmptyAt = null; // when connectedSocketCount last hit 0 — drives room cleanup
+
+  function clearAutoModeratorTimer() {
+    if (autoModeratorTimer) {
+      clearTimeout(autoModeratorTimer);
+      autoModeratorTimer = null;
+    }
+  }
+
+  // Schedules the next auto-moderator step. Re-checks the flag at fire time
+  // (not just now) so toggling auto mode off mid-wait reliably cancels it.
+  function scheduleAuto(fn, delayMs) {
+    clearAutoModeratorTimer();
+    autoModeratorTimer = setTimeout(() => {
+      autoModeratorTimer = null;
+      if (autoModeratorEnabled) fn();
+    }, delayMs);
+  }
+
+  function stopAutoModerator(reason) {
+    autoModeratorEnabled = false;
+    clearAutoModeratorTimer();
+    if (reason) io.to('room:' + roomCode).emit('auto_moderator_stopped', { reason });
+    broadcast();
+  }
+
+  function clearSpotifyDisconnectTimer() {
+    if (spotifyDisconnectTimer) {
+      clearTimeout(spotifyDisconnectTimer);
+      spotifyDisconnectTimer = null;
+    }
+  }
+
+  function disconnectSpotify() {
+    if (!spotifyAccessToken && !spotifyRefreshToken) return;
+    spotifyAccessToken = null;
+    spotifyRefreshToken = null;
+    spotifyTokenExpiry = 0;
+    console.log('  [' + roomCode + '] Spotify getrennt: keine offenen Tabs mehr');
+    broadcast();
+  }
+
+  function registerConnection() {
+    connectedSocketCount++;
+    lastEmptyAt = null;
+    clearSpotifyDisconnectTimer();
+  }
+
+  function unregisterConnection() {
+    connectedSocketCount--;
+    if (connectedSocketCount <= 0) {
+      lastEmptyAt = Date.now();
+      clearSpotifyDisconnectTimer();
+      spotifyDisconnectTimer = setTimeout(() => {
+        spotifyDisconnectTimer = null;
+        if (connectedSocketCount <= 0) disconnectSpotify();
+      }, SPOTIFY_DISCONNECT_GRACE_MS);
+    }
+  }
+
+  function getFullState() {
+    return {
+      roomCode,
+      gameState,
+      teams: Object.fromEntries(teams),
+      currentRound,
+      spinToken,
+      currentCategory,
+      currentMysterySub,
+      currentSong,
+      answers: Object.fromEntries(answers),
+      timerValue,
+      categories: CATEGORIES,
+      spotifyReady: !!spotifyAccessToken,
+      autoModeratorEnabled,
+      autoModeratorPlaylist,
+    };
+  }
+
+  function broadcast() {
+    io.to('room:' + roomCode).emit('game_state', getFullState());
+  }
+
+  function clearTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+  }
+
+  function startTimer() {
+    clearTimer();
+    timerInterval = setInterval(() => {
+      timerValue--;
+      io.to('room:' + roomCode).emit('timer_tick', timerValue);
+      if (timerValue <= 0) {
+        clearTimer();
+        io.to('room:' + roomCode).emit('spotify_pause');
+        broadcast();
+        if (autoModeratorEnabled) scheduleAuto(doRevealSolution, AUTO_REVEAL_HOLD_MS);
+      }
+    }, 1000);
+  }
+
+  // ── Spotify OAuth (per room) ────────────────────────────────────
+
+  async function refreshSpotifyToken() {
+    if (!spotifyRefreshToken) return false;
+    try {
+      const resp = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64'),
+        },
+        body: querystring.stringify({
+          grant_type: 'refresh_token',
+          refresh_token: spotifyRefreshToken,
+        }),
+      });
+      const data = await resp.json();
+      if (data.access_token) {
+        spotifyAccessToken = data.access_token;
+        spotifyTokenExpiry = Date.now() + data.expires_in * 1000;
+        if (data.refresh_token) spotifyRefreshToken = data.refresh_token;
+        return true;
+      }
+    } catch (e) {
+      console.error('Spotify token refresh failed:', e.message);
+    }
+    return false;
+  }
+
+  async function getValidToken() {
+    if (!spotifyAccessToken) return null;
+    if (Date.now() > spotifyTokenExpiry - 60000) {
+      await refreshSpotifyToken();
+    }
+    return spotifyAccessToken;
+  }
+
+  function setSpotifyTokens(accessToken, refreshToken, expiresIn) {
+    spotifyAccessToken = accessToken;
+    spotifyRefreshToken = refreshToken;
+    spotifyTokenExpiry = Date.now() + expiresIn * 1000;
+    broadcast();
+  }
+
+  // Shared by the moderator's "Zufälliger Song" button and the automatic
+  // moderator loop, so both pick songs the exact same way.
+  async function fetchRandomPlaylistTrack(playlistIndex) {
+    const token = await getValidToken();
+    if (!token) throw httpError(401, 'Nicht mit Spotify verbunden');
+
+    const playlist = SPOTIFY_PLAYLISTS[playlistIndex] || SPOTIFY_PLAYLISTS[0];
+    const playlistId = extractPlaylistId(playlist?.url);
+    if (!playlistId) throw httpError(400, 'Keine Playlist im Code hinterlegt (SPOTIFY_PLAYLISTS in server.js)');
+
+    const metaResp = await fetch(
+      'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=items.total',
+      { headers: { 'Authorization': 'Bearer ' + token } }
+    );
+    const meta = await metaResp.json();
+    if (!metaResp.ok) throw httpError(metaResp.status, meta.error?.message || 'Playlist nicht gefunden');
+
+    const total = meta.items?.total || 0;
+    if (!total) throw httpError(404, 'Playlist ist leer — Spotify-Antwort: ' + JSON.stringify(meta));
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const offset = Math.floor(Math.random() * total);
+      const resp = await fetch(
+        'https://api.spotify.com/v1/playlists/' + playlistId + '/items?' + querystring.stringify({
+          limit: 1, offset, market: 'DE',
+          fields: 'items(is_local,item(name,uri,id,artists,album,preview_url,duration_ms))',
+        }),
+        { headers: { 'Authorization': 'Bearer ' + token } }
+      );
+      const data = await resp.json();
+      const entry = data.items?.[0];
+      const track = entry?.item;
+      if (track && !entry.is_local && track.uri) {
+        return mapTrack(track);
+      }
+    }
+    throw httpError(404, 'Kein abspielbarer Song in der Playlist gefunden');
+  }
+
+  // ── Round actions ────────────────────────────────────────────────
+  // Shared by the socket handlers (manual/moderator-triggered) and the
+  // automatic moderator loop below, so both drive the exact same state
+  // transitions instead of duplicating the logic.
+
+  function doStartSpin() {
+    gameState = 'spinning';
+    spinToken++;
+    currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+    currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
+    answers.clear();
+    broadcast();
+
+    if (autoModeratorEnabled) {
+      autoModeratorRetries = 0;
+      scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
+    }
+  }
+
+  function doSetSong(song) {
+    currentSong = song;
+    gameState = 'playing';
+    timerValue = TIMER_SECONDS;
+    broadcast();
+    startTimer();
+    if (song.spotifyUri) {
+      io.to('room:' + roomCode).emit('spotify_play', { uri: song.spotifyUri });
+    }
+  }
+
+  async function doAutoPickSong() {
+    if (!autoModeratorEnabled) return;
+    try {
+      const track = await fetchRandomPlaylistTrack(autoModeratorPlaylist);
+      autoModeratorRetries = 0;
+      doSetSong({
+        title: track.title,
+        artist: track.artist,
+        year: track.year,
+        spotifyUri: track.spotifyUri,
+        cover: track.cover,
+      });
+    } catch (e) {
+      autoModeratorRetries++;
+      if (autoModeratorRetries >= AUTO_MAX_RETRIES) {
+        autoModeratorRetries = 0;
+        stopAutoModerator('Konnte keinen Song laden: ' + e.message);
+        return;
+      }
+      scheduleAuto(doAutoPickSong, AUTO_RETRY_MS);
+    }
+  }
+
+  function doRevealSolution() {
+    clearTimer();
+    gameState = 'revealing';
+    io.to('room:' + roomCode).emit('spotify_pause');
+    broadcast();
+
+    if (autoModeratorEnabled) scheduleAuto(doNextRound, AUTO_REVEAL_DURATION_MS);
+  }
+
+  function doRedrawCategory() {
+    clearTimer();
+    spinToken++;
+    currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+    currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
+    currentSong = null;
+    answers.clear();
+    gameState = 'spinning';
+    io.to('room:' + roomCode).emit('spotify_pause');
+    broadcast();
+
+    if (autoModeratorEnabled) {
+      autoModeratorRetries = 0;
+      scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
+    }
+  }
+
+  function doNextRound() {
+    currentRound++;
+    currentCategory = null;
+    currentMysterySub = null;
+    currentSong = null;
+    answers.clear();
+    gameState = 'between_rounds';
+    broadcast();
+
+    if (autoModeratorEnabled) scheduleAuto(doStartSpin, AUTO_BETWEEN_ROUNDS_MS);
+  }
+
+  function doResetGame() {
+    clearTimer();
+    currentRound = 0;
+    currentCategory = null;
+    currentMysterySub = null;
+    currentSong = null;
+    answers.clear();
+    gameState = 'lobby';
+    for (const [, team] of teams) {
+      team.bingoCard = generateBingoCard();
+      team.score = 0;
+      team.hasBingo = false;
+    }
+    io.to('room:' + roomCode).emit('spotify_pause');
+    broadcast();
+
+    if (autoModeratorEnabled) scheduleAuto(doStartSpin, AUTO_BETWEEN_ROUNDS_MS);
+  }
+
+  // ── Socket-facing operations ────────────────────────────────────
+
+  // Validate before the team exists so a rejected name/emoji never leaves a
+  // half-created team with a placeholder name behind. Resuming (reload/
+  // network hiccup) needs no validation — just cancels the pending removal.
+  function resolveTeamJoin(data) {
+    let teamId = data.teamId;
+    const resuming = teamId && teams.has(teamId);
+
+    if (resuming) {
+      const pending = pendingTeamRemoval.get(teamId);
+      if (pending) {
+        clearTimeout(pending);
+        pendingTeamRemoval.delete(teamId);
+      }
+      return { ok: true, teamId };
+    }
+
+    const name = typeof data.name === 'string' ? data.name.trim() : '';
+    const emoji = data.emoji || '🚀';
+
+    if (!name) return { ok: false, message: 'Teamname fehlt.' };
+    if (teams.size >= MAX_TEAMS) return { ok: false, message: 'Maximale Teamanzahl erreicht' };
+
+    const nameTaken = [...teams.values()].some(
+      (t) => t.name.trim().toLowerCase() === name.toLowerCase()
+    );
+    if (nameTaken) return { ok: false, field: 'name', message: 'Dieser Teamname ist bereits vergeben.' };
+
+    const emojiTaken = [...teams.values()].some((t) => t.emoji === emoji);
+    if (emojiTaken) return { ok: false, field: 'emoji', message: 'Dieses Emoji ist bereits vergeben.' };
+
+    teamId = uuidv4();
+    teams.set(teamId, {
+      id: teamId,
+      name,
+      emoji,
+      bingoCard: generateBingoCard(),
+      score: 0,
+      hasBingo: false,
+    });
+    return { ok: true, teamId };
+  }
+
+  // Don't remove immediately — a page reload or brief network drop also
+  // fires 'disconnect' and would otherwise wipe a still-playing team. The
+  // 'join' resume path (resolveTeamJoin above) cancels this if the same
+  // team reconnects in time.
+  function handleTeamDisconnect(teamId) {
+    const timer = setTimeout(() => {
+      pendingTeamRemoval.delete(teamId);
+      if (!teams.has(teamId)) return;
+      teams.delete(teamId);
+      answers.delete(teamId);
+      broadcast();
+    }, TEAM_DISCONNECT_GRACE_MS);
+    pendingTeamRemoval.set(teamId, timer);
+  }
+
+  function submitAnswer(teamId, answer) {
+    if (gameState !== 'playing') return;
+    answers.set(teamId, answer);
+    broadcast();
+  }
+
+  function markCorrect(teamId, row, col) {
+    const team = teams.get(teamId);
+    if (!team) return;
+    const cell = team.bingoCard[row][col];
+    cell.checked = !cell.checked;
+    team.score = team.bingoCard.flat().filter(c => c.checked).length;
+    team.hasBingo = checkBingo(team.bingoCard);
+    broadcast();
+  }
+
+  function kickTeam(teamId) {
+    if (!teams.has(teamId)) return;
+    const pending = pendingTeamRemoval.get(teamId);
+    if (pending) {
+      clearTimeout(pending);
+      pendingTeamRemoval.delete(teamId);
+    }
+    teams.delete(teamId);
+    answers.delete(teamId);
+    io.to('team_' + teamId).emit('kicked');
+    broadcast();
+  }
+
+  // Turns the automatic moderator loop on/off. While enabled, the server
+  // itself drives start_spin → auto-picked song → timer → reveal_solution →
+  // next_round in a loop, so the host can join as a team on their phone
+  // instead of operating this screen.
+  async function setAutoModerator(enabled, playlistIndex) {
+    if (!enabled) {
+      autoModeratorEnabled = false;
+      clearAutoModeratorTimer();
+      broadcast();
+      return { ok: true };
+    }
+
+    const token = await getValidToken();
+    if (!token) {
+      return { ok: false, message: 'Spotify muss verbunden sein, damit der automatische Moderator Songs auswählen kann.' };
+    }
+
+    if (typeof playlistIndex === 'number' && SPOTIFY_PLAYLISTS[playlistIndex]) {
+      autoModeratorPlaylist = playlistIndex;
+    }
+    autoModeratorEnabled = true;
+    autoModeratorRetries = 0;
+    broadcast();
+
+    // Resume the loop from wherever the game currently stands.
+    clearAutoModeratorTimer();
+    if (gameState === 'lobby' || gameState === 'between_rounds') {
+      scheduleAuto(doStartSpin, 1500);
+    } else if (gameState === 'spinning') {
+      scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
+    } else if (gameState === 'revealing') {
+      scheduleAuto(doNextRound, AUTO_REVEAL_DURATION_MS);
+    }
+    // gameState === 'playing': the running timer's own zero-check already
+    // schedules doRevealSolution once it hits 0, nothing to do here.
+    return { ok: true };
+  }
+
+  function close() {
+    clearTimer();
+    clearAutoModeratorTimer();
+    clearSpotifyDisconnectTimer();
+    io.to('room:' + roomCode).emit('room_closed');
+  }
+
+  return {
+    roomCode,
+    createdAt,
+    teams,
+    get gameState() { return gameState; },
+    get connectedSocketCount() { return connectedSocketCount; },
+    get lastEmptyAt() { return lastEmptyAt; },
+    getFullState,
+    broadcast,
+    registerConnection,
+    unregisterConnection,
+    resolveTeamJoin,
+    handleTeamDisconnect,
+    submitAnswer,
+    markCorrect,
+    kickTeam,
+    setAutoModerator,
+    clearAutoModeratorTimer,
+    doStartSpin,
+    doSetSong,
+    doRevealSolution,
+    doRedrawCategory,
+    doNextRound,
+    doResetGame,
+    getValidToken,
+    fetchRandomPlaylistTrack,
+    setSpotifyTokens,
+    close,
+  };
+}
+
+// Removes rooms nobody has had open for a long time so a multi-day event
+// doesn't slowly accumulate abandoned sessions in memory.
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, session] of sessions) {
+    if (session.connectedSocketCount === 0 && session.lastEmptyAt && now - session.lastEmptyAt > ROOM_EMPTY_TTL_MS) {
+      session.close();
+      sessions.delete(code);
+      console.log('  Runde ' + code + ' wegen Inaktivität entfernt');
+    }
+  }
+}, 10 * 60 * 1000);
+
+// ── Room management API ───────────────────────────────────────────
+
+app.post('/api/rooms', (req, res) => {
+  const roomCode = generateRoomCode();
+  sessions.set(roomCode, createSession(roomCode));
+  res.json({ roomCode });
+});
+
+app.get('/api/rooms', (req, res) => {
+  const rooms = [...sessions.values()].map((s) => ({
+    roomCode: s.roomCode,
+    createdAt: s.createdAt,
+    teamCount: s.teams.size,
+    gameState: s.gameState,
+  })).sort((a, b) => a.createdAt - b.createdAt);
+  res.json({ rooms });
+});
+
+app.delete('/api/rooms/:code', (req, res) => {
+  const session = sessions.get(req.params.code);
+  if (!session) return res.status(404).json({ error: 'Runde nicht gefunden' });
+  session.close();
+  sessions.delete(req.params.code);
+  res.json({ ok: true });
+});
+
+// ── Join QR code ────────────────────────────────────────────────
+
+app.get('/api/join-qr', async (req, res) => {
+  const roomCode = req.query.room;
+  if (!roomCode || !sessions.has(roomCode)) {
+    return res.status(404).json({ error: 'Unbekannte Runde' });
+  }
+  try {
+    const joinUrl = PUBLIC_BASE_URL + '/team.html?room=' + encodeURIComponent(roomCode);
+    const png = await QRCode.toBuffer(joinUrl, { width: 400, margin: 1 });
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'no-store');
+    res.send(png);
+  } catch (err) {
+    res.status(500).json({ error: 'QR generation failed' });
+  }
+});
+
+// ── Spotify OAuth ───────────────────────────────────────────────
+
+app.get('/auth/spotify/debug', (req, res) => {
+  const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
+  const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
+    response_type: 'code',
+    client_id: SPOTIFY_CLIENT_ID,
+    scope: scopes,
+    redirect_uri: SPOTIFY_REDIRECT_URI,
+    show_dialog: true,
+  });
+  res.send('<html><body style="background:#0a0e27;color:#e0e6ff;font-family:monospace;padding:2rem">'
+    + '<h2 style="color:#4cc9f0">Spotify Debug</h2>'
+    + '<p><b>redirect_uri im Code:</b></p>'
+    + '<pre style="background:#131838;padding:1rem;border-radius:8px;user-select:all;color:#ffd60a">' + SPOTIFY_REDIRECT_URI + '</pre>'
+    + '<p style="margin-top:1rem">Kopiere die URI oben und trage sie <b>exakt so</b> im Spotify Dashboard ein.</p>'
+    + '<p style="margin-top:1rem"><a href="' + authUrl + '" style="color:#06d6a0">→ Weiter zu Spotify Auth</a></p>'
+    + '</body></html>');
+});
+
+app.get('/auth/spotify', (req, res) => {
+  const roomCode = req.query.room;
+  if (!roomCode || !sessions.has(roomCode)) {
+    return res.status(404).send('Unbekannte Runde. Bitte den Verbinden-Link erneut über die Moderationsseite öffnen.');
+  }
+  if (!SPOTIFY_CLIENT_ID) {
+    return res.status(500).send('SPOTIFY_CLIENT_ID nicht gesetzt. Starte den Server mit: SPOTIFY_CLIENT_ID=xxx SPOTIFY_CLIENT_SECRET=yyy node server.js');
+  }
+  const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
+  const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
+    response_type: 'code',
+    client_id: SPOTIFY_CLIENT_ID,
+    scope: scopes,
+    redirect_uri: SPOTIFY_REDIRECT_URI,
+    show_dialog: true,
+    state: roomCode,
+  });
+  res.redirect(authUrl);
+});
+
+app.get('/auth/spotify/callback', async (req, res) => {
+  const { code, error, state } = req.query;
+  if (error) return res.send('Spotify Auth Fehler: ' + error);
+  if (!code) return res.send('Kein Code erhalten');
+
+  const session = state && sessions.get(state);
+  if (!session) return res.send('Runde nicht mehr aktiv. Bitte erneut über die Moderationsseite dieser Runde verbinden.');
+
+  try {
+    const resp = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64'),
+      },
+      body: querystring.stringify({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: SPOTIFY_REDIRECT_URI,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) return res.send('Token-Fehler: ' + data.error_description);
+
+    session.setSpotifyTokens(data.access_token, data.refresh_token, data.expires_in);
+    res.send('<html><body style="background:#0a0e27;color:#4cc9f0;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;font-size:1.5rem"><div style="text-align:center">✅ Spotify verbunden!<br><br><small style="color:#8892b0">Du kannst dieses Fenster schließen.</small></div></body></html>');
+  } catch (e) {
+    res.status(500).send('Fehler: ' + e.message);
+  }
+});
+
+function requireSession(req, res) {
+  const session = sessions.get(req.query.room);
+  if (!session) {
+    res.status(404).json({ error: 'Unbekannte oder keine Runde angegeben' });
+    return null;
+  }
+  return session;
+}
+
+// Spotify API proxy: the client gets the token to init the Web Playback SDK
+app.get('/api/spotify/token', async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const token = await session.getValidToken();
+  res.json({ token: token || null });
+});
+
 app.get('/api/spotify/search', async (req, res) => {
-  const token = await getValidToken();
+  const session = requireSession(req, res);
+  if (!session) return;
+  const token = await session.getValidToken();
   if (!token) return res.status(401).json({ error: 'Nicht mit Spotify verbunden' });
 
   const q = req.query.q;
@@ -508,59 +939,16 @@ app.get('/api/spotify/search', async (req, res) => {
   }
 });
 
+// Static config, no session needed — same playlist list offered to every room.
 app.get('/api/spotify/playlists', (req, res) => {
   res.json({ playlists: SPOTIFY_PLAYLISTS.map((p, index) => ({ index, name: p.name })) });
 });
 
-function httpError(status, message) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
-}
-
-// Shared by the moderator's "Zufälliger Song" button and the automatic
-// moderator loop, so both pick songs the exact same way.
-async function fetchRandomPlaylistTrack(playlistIndex) {
-  const token = await getValidToken();
-  if (!token) throw httpError(401, 'Nicht mit Spotify verbunden');
-
-  const playlist = SPOTIFY_PLAYLISTS[playlistIndex] || SPOTIFY_PLAYLISTS[0];
-  const playlistId = extractPlaylistId(playlist?.url);
-  if (!playlistId) throw httpError(400, 'Keine Playlist im Code hinterlegt (SPOTIFY_PLAYLISTS in server.js)');
-
-  const metaResp = await fetch(
-    'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=items.total',
-    { headers: { 'Authorization': 'Bearer ' + token } }
-  );
-  const meta = await metaResp.json();
-  console.log('[playlist-random] playlistId=' + playlistId + ' status=' + metaResp.status + ' body=' + JSON.stringify(meta));
-  if (!metaResp.ok) throw httpError(metaResp.status, meta.error?.message || 'Playlist nicht gefunden');
-
-  const total = meta.items?.total || 0;
-  if (!total) throw httpError(404, 'Playlist ist leer — Spotify-Antwort: ' + JSON.stringify(meta));
-
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const offset = Math.floor(Math.random() * total);
-    const resp = await fetch(
-      'https://api.spotify.com/v1/playlists/' + playlistId + '/items?' + querystring.stringify({
-        limit: 1, offset, market: 'DE',
-        fields: 'items(is_local,item(name,uri,id,artists,album,preview_url,duration_ms))',
-      }),
-      { headers: { 'Authorization': 'Bearer ' + token } }
-    );
-    const data = await resp.json();
-    const entry = data.items?.[0];
-    const track = entry?.item;
-    if (track && !entry.is_local && track.uri) {
-      return mapTrack(track);
-    }
-  }
-  throw httpError(404, 'Kein abspielbarer Song in der Playlist gefunden');
-}
-
 app.get('/api/spotify/playlist-random', async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
   try {
-    const track = await fetchRandomPlaylistTrack(parseInt(req.query.playlist));
+    const track = await session.fetchRandomPlaylistTrack(parseInt(req.query.playlist));
     res.json({ track });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -568,7 +956,9 @@ app.get('/api/spotify/playlist-random', async (req, res) => {
 });
 
 app.put('/api/spotify/play', async (req, res) => {
-  const token = await getValidToken();
+  const session = requireSession(req, res);
+  if (!session) return;
+  const token = await session.getValidToken();
   if (!token) return res.status(401).json({ error: 'Nicht mit Spotify verbunden' });
 
   const { uri, deviceId } = req.body;
@@ -593,7 +983,9 @@ app.put('/api/spotify/play', async (req, res) => {
 });
 
 app.put('/api/spotify/pause', async (req, res) => {
-  const token = await getValidToken();
+  const session = requireSession(req, res);
+  if (!session) return;
+  const token = await session.getValidToken();
   if (!token) return res.status(401).json({ error: 'Nicht verbunden' });
 
   try {
@@ -607,314 +999,101 @@ app.put('/api/spotify/pause', async (req, res) => {
   }
 });
 
-// ── Round actions ───────────────────────────────────────────────
-// Shared by the socket handlers (manual/moderator-triggered) and the
-// automatic moderator loop below, so both drive the exact same state
-// transitions instead of duplicating the logic.
-
-function doStartSpin() {
-  gameState = 'spinning';
-  spinToken++;
-  currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
-  currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
-  answers.clear();
-  broadcast();
-
-  if (autoModeratorEnabled) {
-    autoModeratorRetries = 0;
-    scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
-  }
-}
-
-function doSetSong(song) {
-  currentSong = song;
-  gameState = 'playing';
-  timerValue = TIMER_SECONDS;
-  broadcast();
-  startTimer();
-  // Tell display to start Spotify playback
-  if (song.spotifyUri) {
-    io.emit('spotify_play', { uri: song.spotifyUri });
-  }
-}
-
-async function doAutoPickSong() {
-  if (!autoModeratorEnabled) return;
-  try {
-    const track = await fetchRandomPlaylistTrack(autoModeratorPlaylist);
-    autoModeratorRetries = 0;
-    doSetSong({
-      title: track.title,
-      artist: track.artist,
-      year: track.year,
-      spotifyUri: track.spotifyUri,
-      cover: track.cover,
-    });
-  } catch (e) {
-    autoModeratorRetries++;
-    if (autoModeratorRetries >= AUTO_MAX_RETRIES) {
-      autoModeratorRetries = 0;
-      stopAutoModerator('Konnte keinen Song laden: ' + e.message);
-      return;
-    }
-    scheduleAuto(doAutoPickSong, AUTO_RETRY_MS);
-  }
-}
-
-function doRevealSolution() {
-  clearTimer();
-  gameState = 'revealing';
-  io.emit('spotify_pause');
-  broadcast();
-
-  if (autoModeratorEnabled) scheduleAuto(doNextRound, AUTO_REVEAL_DURATION_MS);
-}
-
-function doRedrawCategory() {
-  clearTimer();
-  spinToken++;
-  currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
-  currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
-  currentSong = null;
-  answers.clear();
-  gameState = 'spinning';
-  io.emit('spotify_pause');
-  broadcast();
-
-  if (autoModeratorEnabled) {
-    autoModeratorRetries = 0;
-    scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
-  }
-}
-
-function doNextRound() {
-  currentRound++;
-  currentCategory = null;
-  currentMysterySub = null;
-  currentSong = null;
-  answers.clear();
-  gameState = 'between_rounds';
-  broadcast();
-
-  if (autoModeratorEnabled) scheduleAuto(doStartSpin, AUTO_BETWEEN_ROUNDS_MS);
-}
-
-function doResetGame() {
-  clearTimer();
-  currentRound = 0;
-  currentCategory = null;
-  currentMysterySub = null;
-  currentSong = null;
-  answers.clear();
-  gameState = 'lobby';
-  for (const [, team] of teams) {
-    team.bingoCard = generateBingoCard();
-    team.score = 0;
-    team.hasBingo = false;
-  }
-  io.emit('spotify_pause');
-  broadcast();
-
-  if (autoModeratorEnabled) scheduleAuto(doStartSpin, AUTO_BETWEEN_ROUNDS_MS);
-}
-
 // ── Socket.IO ───────────────────────────────────────────────────
+// Which room a socket belongs to is fixed at connection time via the
+// `room` handshake query param (see shared.js's connectSocket()) — every
+// view already knows its own room from its own URL before it ever opens a
+// socket, so the server can resolve (and validate) the session immediately,
+// without waiting for a 'join'. That's what lets e.g. the team setup screen
+// see already-taken names/emojis live, before the player has joined at all.
 
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  const roomCode = socket.handshake.query.room;
+  const session = roomCode && sessions.get(roomCode);
 
-  // Send the current state right away, before any 'join' — lets a client
-  // still on the team setup screen see already-taken names/emojis live.
-  socket.emit('game_state', getFullState());
+  console.log('Client connected:', socket.id, 'room:', roomCode || '(none)');
+
+  if (!session) {
+    socket.emit('invalid_room');
+    return;
+  }
+
+  socket.roomCode = roomCode;
+  session.registerConnection();
+  socket.join('room:' + roomCode);
+  socket.emit('game_state', session.getFullState());
 
   socket.on('join', (data, ack) => {
-    const { role } = data;
+    const { role } = data || {};
     const reply = (res) => { if (typeof ack === 'function') ack(res); };
     let teamId;
 
     if (role === 'team') {
-      teamId = data.teamId;
-      const resuming = teamId && teams.has(teamId);
-
-      if (resuming) {
-        // Reconnected (reload/network hiccup) before the grace period
-        // expired — the team stays, cancel its scheduled removal.
-        const pending = pendingTeamRemoval.get(teamId);
-        if (pending) {
-          clearTimeout(pending);
-          pendingTeamRemoval.delete(teamId);
-        }
-      } else {
-        // Validate before the team exists so a rejected name/emoji never
-        // leaves a half-created team with a placeholder name behind.
-        const name = typeof data.name === 'string' ? data.name.trim() : '';
-        const emoji = data.emoji || '🚀';
-
-        if (!name) {
-          reply({ ok: false, message: 'Teamname fehlt.' });
-          return;
-        }
-        if (teams.size >= MAX_TEAMS) {
-          reply({ ok: false, message: 'Maximale Teamanzahl erreicht' });
-          return;
-        }
-        const nameTaken = [...teams.values()].some(
-          (t) => t.name.trim().toLowerCase() === name.toLowerCase()
-        );
-        if (nameTaken) {
-          reply({ ok: false, field: 'name', message: 'Dieser Teamname ist bereits vergeben.' });
-          return;
-        }
-        const emojiTaken = [...teams.values()].some((t) => t.emoji === emoji);
-        if (emojiTaken) {
-          reply({ ok: false, field: 'emoji', message: 'Dieses Emoji ist bereits vergeben.' });
-          return;
-        }
-
-        teamId = uuidv4();
-        teams.set(teamId, {
-          id: teamId,
-          name,
-          emoji,
-          bingoCard: generateBingoCard(),
-          score: 0,
-          hasBingo: false,
-        });
-      }
-
+      const result = session.resolveTeamJoin(data);
+      if (!result.ok) { reply(result); return; }
+      teamId = result.teamId;
       socket.join('team_' + teamId);
       socket.teamId = teamId;
     }
 
     socket.join(role);
-    socket.emit('game_state', getFullState());
-    broadcast();
+    socket.emit('game_state', session.getFullState());
+    session.broadcast();
     reply({ ok: true, teamId: role === 'team' ? teamId : undefined });
   });
 
   socket.on('start_spin', () => {
-    clearAutoModeratorTimer();
-    doStartSpin();
+    session.clearAutoModeratorTimer();
+    session.doStartSpin();
   });
 
   socket.on('set_song', (song) => {
-    clearAutoModeratorTimer();
-    doSetSong(song);
+    session.clearAutoModeratorTimer();
+    session.doSetSong(song);
   });
 
   socket.on('submit_answer', (data) => {
-    if (gameState !== 'playing') return;
-    answers.set(data.teamId, data.answer);
-    broadcast();
+    session.submitAnswer(data.teamId, data.answer);
   });
 
   socket.on('reveal_solution', () => {
-    clearAutoModeratorTimer();
-    doRevealSolution();
+    session.clearAutoModeratorTimer();
+    session.doRevealSolution();
   });
 
-  // Turns the automatic moderator loop on/off. While enabled, the server
-  // itself drives start_spin → auto-picked song → timer → reveal_solution →
-  // next_round in a loop, so the host can join as a team on their phone
-  // instead of operating this screen. Manual controls keep working on top
-  // of it — each one clears the pending auto step and, if the action itself
-  // schedules a follow-up (see doStartSpin etc.), the loop just resumes
-  // from there.
   socket.on('set_auto_moderator', async (data, ack) => {
     const reply = (res) => { if (typeof ack === 'function') ack(res); };
-    const enabled = !!(data && data.enabled);
-
-    if (!enabled) {
-      autoModeratorEnabled = false;
-      clearAutoModeratorTimer();
-      broadcast();
-      reply({ ok: true });
-      return;
-    }
-
-    const token = await getValidToken();
-    if (!token) {
-      reply({ ok: false, message: 'Spotify muss verbunden sein, damit der automatische Moderator Songs auswählen kann.' });
-      return;
-    }
-
-    if (typeof data.playlist === 'number' && SPOTIFY_PLAYLISTS[data.playlist]) {
-      autoModeratorPlaylist = data.playlist;
-    }
-    autoModeratorEnabled = true;
-    autoModeratorRetries = 0;
-    broadcast();
-    reply({ ok: true });
-
-    // Resume the loop from wherever the game currently stands.
-    clearAutoModeratorTimer();
-    if (gameState === 'lobby' || gameState === 'between_rounds') {
-      scheduleAuto(doStartSpin, 1500);
-    } else if (gameState === 'spinning') {
-      scheduleAuto(doAutoPickSong, AUTO_SPIN_REVEAL_MS);
-    } else if (gameState === 'revealing') {
-      scheduleAuto(doNextRound, AUTO_REVEAL_DURATION_MS);
-    }
-    // gameState === 'playing': the running timer's own zero-check already
-    // schedules doRevealSolution once it hits 0, nothing to do here.
+    const result = await session.setAutoModerator(!!(data && data.enabled), data && data.playlist);
+    reply(result);
   });
 
   socket.on('mark_correct', (data) => {
-    const team = teams.get(data.teamId);
-    if (!team) return;
-    const cell = team.bingoCard[data.row][data.col];
-    cell.checked = !cell.checked;
-    team.score = team.bingoCard.flat().filter(c => c.checked).length;
-    team.hasBingo = checkBingo(team.bingoCard);
-    broadcast();
+    session.markCorrect(data.teamId, data.row, data.col);
   });
 
   socket.on('kick_team', (data) => {
-    const teamId = data.teamId;
-    if (!teams.has(teamId)) return;
-    const pending = pendingTeamRemoval.get(teamId);
-    if (pending) {
-      clearTimeout(pending);
-      pendingTeamRemoval.delete(teamId);
-    }
-    teams.delete(teamId);
-    answers.delete(teamId);
-    io.to('team_' + teamId).emit('kicked');
-    broadcast();
+    session.kickTeam(data.teamId);
   });
 
   socket.on('redraw_category', () => {
-    clearAutoModeratorTimer();
-    doRedrawCategory();
+    session.clearAutoModeratorTimer();
+    session.doRedrawCategory();
   });
 
   socket.on('next_round', () => {
-    clearAutoModeratorTimer();
-    doNextRound();
+    session.clearAutoModeratorTimer();
+    session.doNextRound();
   });
 
   socket.on('reset_game', () => {
-    clearAutoModeratorTimer();
-    doResetGame();
+    session.clearAutoModeratorTimer();
+    session.doResetGame();
   });
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
-
-    const teamId = socket.teamId;
-    if (!teamId) return;
-
-    // Don't remove immediately — a page reload or brief network drop also
-    // fires 'disconnect' and would otherwise wipe a still-playing team.
-    // The 'join' resume path cancels this if the same team reconnects.
-    const timer = setTimeout(() => {
-      pendingTeamRemoval.delete(teamId);
-      if (!teams.has(teamId)) return;
-      teams.delete(teamId);
-      answers.delete(teamId);
-      broadcast();
-    }, TEAM_DISCONNECT_GRACE_MS);
-    pendingTeamRemoval.set(teamId, timer);
+    session.unregisterConnection();
+    if (socket.teamId) session.handleTeamDisconnect(socket.teamId);
   });
 });
 
@@ -935,16 +1114,10 @@ server.listen(PORT, () => {
   console.log('  🚀 Hitster Bingo - Space Edition');
   console.log('  ─────────────────────────────────');
   console.log('  Server:     http://localhost:' + PORT);
-  console.log('');
-  console.log('  Ansichten:');
-  console.log('    Start:       http://localhost:' + PORT);
-  console.log('    Beamer:      http://localhost:' + PORT + '/display.html');
-  console.log('    Moderation:  http://localhost:' + PORT + '/moderator.html');
-  console.log('    Team:        http://localhost:' + PORT + '/team.html');
-  console.log('    Übersicht:   http://localhost:' + PORT + '/overview.html');
+  console.log('  Rundenverwaltung: http://localhost:' + PORT + '/');
   console.log('');
   if (SPOTIFY_CLIENT_ID) {
-    console.log('  Spotify Auth:  http://127.0.0.1:' + PORT + '/auth/spotify');
+    console.log('  Spotify Auth (pro Runde):  http://127.0.0.1:' + PORT + '/auth/spotify?room=<code>');
     console.log('');
     console.log('  ⚠ Trage diese EXAKTE Redirect URI im Spotify Dashboard ein:');
     console.log('  → ' + SPOTIFY_REDIRECT_URI);

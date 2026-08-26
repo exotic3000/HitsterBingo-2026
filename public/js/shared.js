@@ -10,16 +10,40 @@ const CAT_MAP = {
   mystery: { name:'?',          color:'#4361ee', icon:'❓' },
 };
 
+/* ── Room code ──────────────────────────────────────────────── */
+
+function getRoomCode() {
+  return new URLSearchParams(location.search).get('room') || '';
+}
+
 /* ── Socket wrapper ─────────────────────────────────────────── */
+// The room is bound once, at the handshake, via a query param the server
+// reads before any 'join' — every view already knows its own room from its
+// own URL before it opens a socket at all (see server.js's io.on('connection')).
 
 function connectSocket() {
-  const socket = io();
+  const socket = io({ query: { room: getRoomCode() } });
   const connDot = document.getElementById('conn');
 
   socket.on('connect', () => { if (connDot) connDot.className = 'conn on'; });
   socket.on('disconnect', () => { if (connDot) connDot.className = 'conn off'; });
+  socket.on('invalid_room', () => showRoomUnavailableOverlay());
+  socket.on('room_closed', () => showRoomUnavailableOverlay());
 
   return socket;
+}
+
+function showRoomUnavailableOverlay() {
+  if (document.getElementById('room-unavailable-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'room-unavailable-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(10,14,39,.95);'
+    + 'color:#e0e6ff;display:flex;flex-direction:column;align-items:center;justify-content:center;'
+    + 'gap:1rem;text-align:center;padding:2rem;font-family:inherit';
+  overlay.innerHTML = '<div style="font-size:2.5rem">❌</div>'
+    + '<p style="max-width:420px">Diese Runde ist nicht (mehr) verfügbar. Bitte den Link erneut über die Rundenübersicht öffnen.</p>'
+    + '<a href="/" class="btn btn-primary">Zur Rundenübersicht</a>';
+  document.body.appendChild(overlay);
 }
 
 /* ── Bingo card renderer ────────────────────────────────────── */

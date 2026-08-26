@@ -34,6 +34,7 @@
 
   const socket = connectSocket();
   socket.emit('join', { role: 'display' });
+  const roomCode = getRoomCode();
 
   // ── Particles ──────────────────────────────────────────────────
 
@@ -334,7 +335,7 @@
 
   async function initSpotifyPlayer() {
     try {
-      var resp = await fetch('/api/spotify/token');
+      var resp = await fetch('/api/spotify/token?room=' + encodeURIComponent(roomCode));
       var data = await resp.json();
       if (!data.token) return;
 
@@ -350,7 +351,7 @@
       spotifyPlayer = new Spotify.Player({
         name: 'Hitster Bingo Beamer',
         getOAuthToken: async function(cb) {
-          var r = await fetch('/api/spotify/token');
+          var r = await fetch('/api/spotify/token?room=' + encodeURIComponent(roomCode));
           var d = await r.json();
           cb(d.token);
         },
@@ -371,7 +372,7 @@
   socket.on('spotify_play', async function(data) {
     if (!spotifyDeviceId) return;
     try {
-      await fetch('/api/spotify/play', {
+      await fetch('/api/spotify/play?room=' + encodeURIComponent(roomCode), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uri: data.uri, deviceId: spotifyDeviceId }),
@@ -382,7 +383,7 @@
   socket.on('spotify_pause', async function() {
     try {
       if (spotifyPlayer) spotifyPlayer.pause();
-      await fetch('/api/spotify/pause', { method: 'PUT' });
+      await fetch('/api/spotify/pause?room=' + encodeURIComponent(roomCode), { method: 'PUT' });
     } catch (e) { /* ignore */ }
   });
 
