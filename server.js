@@ -120,11 +120,14 @@ const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0
 // from their phones, so it has to be the tunnel/public domain, not localhost.
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://bingo.hitsterquizshow.de';
 
-// Playlists — Name + Spotify-URL/ID, wählbar in der Moderator-Ansicht. Reine
+// Playlists — Name + Spotify-URL, wählbar in der Moderator-Ansicht. Reine
 // Konfiguration, kein Geheimnis — bleibt bewusst global für alle Runden.
+// These are just the seed defaults for a brand-new install; as soon as
+// anyone adds/removes a playlist via the moderator UI, the persisted file
+// (see loadPlaylists further down) takes over.
 const SPOTIFY_PLAYLISTS = [
-  { name: 'Teenscamp HitsterGameshow 2026', url: 'https://open.spotify.com/playlist/5CF56knZKCMgpfOBz5r0S4?si=CKn55_V1SfGL6anks2hqVg&utm_source=whatsapp&pt=9764aed2b277e286ce2d298fa80145e1' },
-  { name: 'Teenscamp Disse 2026', url : 'https://open.spotify.com/playlist/4RTxuCmYBccS5M6rhAWfMd?si=478a56b62e174378'}
+  { id: uuidv4(), name: 'Teenscamp HitsterGameshow 2026', url: 'https://open.spotify.com/playlist/5CF56knZKCMgpfOBz5r0S4?si=CKn55_V1SfGL6anks2hqVg&utm_source=whatsapp&pt=9764aed2b277e286ce2d298fa80145e1' },
+  { id: uuidv4(), name: 'Teenscamp Disse 2026', url: 'https://open.spotify.com/playlist/4RTxuCmYBccS5M6rhAWfMd?si=478a56b62e174378' },
 ];
 
 // ── Game Constants ──────────────────────────────────────────────
@@ -260,6 +263,38 @@ function httpError(status, message) {
   return err;
 }
 
+// ── Playlists persistence ───────────────────────────────────────────
+// Lets organizers add/remove playlists from the moderator UI instead of
+// editing server.js for every event. Overridable path so tests don't touch
+// the real dev file. Mutated in place (length=0 + push, push, splice) so
+// every closure that already captured the SPOTIFY_PLAYLISTS binding — every
+// room's fetchRandomPlaylistTrack — sees changes immediately without needing
+// to be threaded through separately.
+const PLAYLISTS_FILE = process.env.PLAYLISTS_FILE || path.join(__dirname, '.playlists.json');
+
+function savePlaylists() {
+  try {
+    fs.writeFileSync(PLAYLISTS_FILE, JSON.stringify(SPOTIFY_PLAYLISTS));
+  } catch (e) {
+    console.error('Playlists konnten nicht gespeichert werden:', e.message);
+  }
+}
+
+function loadPlaylists() {
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(PLAYLISTS_FILE, 'utf8'));
+  } catch (e) {
+    return; // no persisted playlists yet — the hardcoded defaults above stay in effect
+  }
+  if (Array.isArray(data) && data.length) {
+    SPOTIFY_PLAYLISTS.length = 0;
+    SPOTIFY_PLAYLISTS.push(...data);
+  }
+}
+
+loadPlaylists();
+
 // ── Rooms (one independent game each) ─────────────────────────────
 // Every group playing at the same time gets its own room: own teams, own
 // timer/round state, own auto-moderator loop, own Spotify login. A room is
@@ -310,13 +345,17 @@ function createSession(roomCode, name, restore) {
   let currentSong = (restore && restore.currentSong) || null;
   let timerValue = restore && typeof restore.timerValue === 'number' ? restore.timerValue : TIMER_SECONDS;
   let timerInterval = null;
+  // Freezes the countdown + Spotify playback for a "playing" round without
+  // losing progress — for a bathroom break or a Spotify hiccup mid-timer,
+  // where Reset (which wipes the round) would be way too blunt a tool.
+  let paused = (restore && restore.paused) || false;
 
   // ── Automatischer Moderator ─────────────────────────────────────
   // Never auto-resumes after a restore — it needs a fresh Spotify
   // connection anyway (tokens aren't persisted), so the moderator has to
   // flip it back on manually. The playlist choice is kept as a convenience.
   let autoModeratorEnabled = false;
-  let autoModeratorPlaylist = (restore && restore.autoModeratorPlaylist) || 0;
+  let autoModeratorPlaylist = (restore && restore.autoModeratorPlaylist) || null;
   let autoModeratorTimer = null;
   let autoModeratorRetries = 0;
   const AUTO_SPIN_REVEAL_MS = 9000;
@@ -406,6 +445,7 @@ function createSession(roomCode, name, restore) {
       currentSong,
       answers: Object.fromEntries(answers),
       timerValue,
+      paused,
       categories: CATEGORIES,
       spotifyReady: !!spotifyAccessToken,
       autoModeratorEnabled,
@@ -436,6 +476,32 @@ function createSession(roomCode, name, restore) {
         if (autoModeratorEnabled) scheduleAuto(doRevealSolution, AUTO_REVEAL_HOLD_MS);
       }
     }, 1000);
+  }
+
+  // Freezes the countdown + Spotify at the current timerValue instead of
+  // resetting/advancing anything — for a technical interruption mid-round
+  // (bathroom break, Spotify hiccup) where the moderator wants to pick up
+  // exactly where the round left off. Only meaningful during 'playing';
+  // every other gameState either has no running timer or is itself already
+  // a natural pause point.
+  function pauseGame() {
+    if (gameState !== 'playing' || paused) return;
+    paused = true;
+    clearTimer();
+    io.to('room:' + roomCode).emit('spotify_pause');
+    broadcast();
+  }
+
+  function resumeGame() {
+    if (!paused) return;
+    paused = false;
+    broadcast();
+    if (gameState === 'playing') {
+      startTimer();
+      if (currentSong && currentSong.spotifyUri) {
+        io.to('room:' + roomCode).emit('spotify_play', { uri: currentSong.spotifyUri });
+      }
+    }
   }
 
   // ── Spotify OAuth (per room) ────────────────────────────────────
@@ -484,13 +550,13 @@ function createSession(roomCode, name, restore) {
 
   // Shared by the moderator's "Zufälliger Song" button and the automatic
   // moderator loop, so both pick songs the exact same way.
-  async function fetchRandomPlaylistTrack(playlistIndex) {
+  async function fetchRandomPlaylistTrack(wantedId) {
     const token = await getValidToken();
     if (!token) throw httpError(401, 'Nicht mit Spotify verbunden');
 
-    const playlist = SPOTIFY_PLAYLISTS[playlistIndex] || SPOTIFY_PLAYLISTS[0];
+    const playlist = SPOTIFY_PLAYLISTS.find((p) => p.id === wantedId) || SPOTIFY_PLAYLISTS[0];
     const playlistId = extractPlaylistId(playlist?.url);
-    if (!playlistId) throw httpError(400, 'Keine Playlist im Code hinterlegt (SPOTIFY_PLAYLISTS in server.js)');
+    if (!playlistId) throw httpError(400, 'Keine Playlist hinterlegt — bitte in der Moderation eine hinzufügen.');
 
     const metaResp = await fetch(
       'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=items.total',
@@ -527,6 +593,7 @@ function createSession(roomCode, name, restore) {
   // transitions instead of duplicating the logic.
 
   function doStartSpin() {
+    paused = false;
     gameState = 'spinning';
     spinToken++;
     currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
@@ -541,6 +608,7 @@ function createSession(roomCode, name, restore) {
   }
 
   function doSetSong(song) {
+    paused = false;
     currentSong = song;
     gameState = 'playing';
     timerValue = TIMER_SECONDS;
@@ -575,6 +643,7 @@ function createSession(roomCode, name, restore) {
   }
 
   function doRevealSolution() {
+    paused = false;
     clearTimer();
     gameState = 'revealing';
     io.to('room:' + roomCode).emit('spotify_pause');
@@ -584,6 +653,7 @@ function createSession(roomCode, name, restore) {
   }
 
   function doRedrawCategory() {
+    paused = false;
     clearTimer();
     spinToken++;
     currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
@@ -601,6 +671,7 @@ function createSession(roomCode, name, restore) {
   }
 
   function doNextRound() {
+    paused = false;
     currentRound++;
     currentCategory = null;
     currentMysterySub = null;
@@ -613,6 +684,7 @@ function createSession(roomCode, name, restore) {
   }
 
   function doResetGame() {
+    paused = false;
     clearTimer();
     currentRound = 0;
     currentCategory = null;
@@ -691,7 +763,7 @@ function createSession(roomCode, name, restore) {
   }
 
   function submitAnswer(teamId, answer) {
-    if (gameState !== 'playing') return;
+    if (gameState !== 'playing' || paused) return;
     answers.set(teamId, answer);
     broadcast();
   }
@@ -723,7 +795,7 @@ function createSession(roomCode, name, restore) {
   // itself drives start_spin → auto-picked song → timer → reveal_solution →
   // next_round in a loop, so the host can join as a team on their phone
   // instead of operating this screen.
-  async function setAutoModerator(enabled, playlistIndex) {
+  async function setAutoModerator(enabled, playlistId) {
     if (!enabled) {
       autoModeratorEnabled = false;
       clearAutoModeratorTimer();
@@ -736,8 +808,8 @@ function createSession(roomCode, name, restore) {
       return { ok: false, message: 'Spotify muss verbunden sein, damit der automatische Moderator Songs auswählen kann.' };
     }
 
-    if (typeof playlistIndex === 'number' && SPOTIFY_PLAYLISTS[playlistIndex]) {
-      autoModeratorPlaylist = playlistIndex;
+    if (playlistId && SPOTIFY_PLAYLISTS.some((p) => p.id === playlistId)) {
+      autoModeratorPlaylist = playlistId;
     }
     autoModeratorEnabled = true;
     autoModeratorRetries = 0;
@@ -780,6 +852,7 @@ function createSession(roomCode, name, restore) {
       currentMysterySub,
       currentSong,
       timerValue,
+      paused,
       autoModeratorPlaylist,
     };
   }
@@ -788,8 +861,9 @@ function createSession(roomCode, name, restore) {
   // saved value once restored — the only piece of state that can't just sit
   // there inert, since its progress lived in a setInterval that died with
   // the process. Every other gameState is static and just gets served as-is
-  // to whoever reconnects next.
-  if (restore && gameState === 'playing') {
+  // to whoever reconnects next. A paused round stays paused — the countdown
+  // shouldn't silently resume behind the moderator's back after a restart.
+  if (restore && gameState === 'playing' && !paused) {
     startTimer();
   }
 
@@ -819,6 +893,8 @@ function createSession(roomCode, name, restore) {
     doRedrawCategory,
     doNextRound,
     doResetGame,
+    pauseGame,
+    resumeGame,
     getValidToken,
     fetchRandomPlaylistTrack,
     setSpotifyTokens,
@@ -1066,14 +1142,35 @@ app.get('/api/spotify/search', async (req, res) => {
 
 // Static config, no session needed — same playlist list offered to every room.
 app.get('/api/spotify/playlists', (req, res) => {
-  res.json({ playlists: SPOTIFY_PLAYLISTS.map((p, index) => ({ index, name: p.name })) });
+  res.json({ playlists: SPOTIFY_PLAYLISTS.map((p) => ({ id: p.id, name: p.name })) });
+});
+
+// Lets a moderator add a playlist from the UI instead of editing server.js.
+app.post('/api/spotify/playlists', requireAuth, (req, res) => {
+  const name = (req.body && typeof req.body.name === 'string' ? req.body.name.trim() : '').slice(0, 60);
+  const url = req.body && req.body.url;
+  if (!name) return res.status(400).json({ error: 'Name fehlt.' });
+  if (!extractPlaylistId(url)) return res.status(400).json({ error: 'Keine gültige Spotify-Playlist-URL.' });
+
+  SPOTIFY_PLAYLISTS.push({ id: uuidv4(), name, url });
+  savePlaylists();
+  res.json({ playlists: SPOTIFY_PLAYLISTS.map((p) => ({ id: p.id, name: p.name })) });
+});
+
+app.delete('/api/spotify/playlists/:id', requireAuth, (req, res) => {
+  const idx = SPOTIFY_PLAYLISTS.findIndex((p) => p.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  if (SPOTIFY_PLAYLISTS.length === 1) return res.status(400).json({ error: 'Mindestens eine Playlist muss übrig bleiben.' });
+  SPOTIFY_PLAYLISTS.splice(idx, 1);
+  savePlaylists();
+  res.json({ playlists: SPOTIFY_PLAYLISTS.map((p) => ({ id: p.id, name: p.name })) });
 });
 
 app.get('/api/spotify/playlist-random', async (req, res) => {
   const session = requireSession(req, res);
   if (!session) return;
   try {
-    const track = await session.fetchRandomPlaylistTrack(parseInt(req.query.playlist));
+    const track = await session.fetchRandomPlaylistTrack(req.query.playlist);
     res.json({ track });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -1179,6 +1276,14 @@ io.on('connection', (socket) => {
 
   socket.on('submit_answer', (data) => {
     session.submitAnswer(data.teamId, data.answer);
+  });
+
+  socket.on('pause_game', () => {
+    session.pauseGame();
+  });
+
+  socket.on('resume_game', () => {
+    session.resumeGame();
   });
 
   socket.on('reveal_solution', () => {

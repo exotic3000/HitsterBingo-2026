@@ -44,6 +44,11 @@
       <span id="room-badge" style="font-size:.75rem;color:var(--text-dim);font-family:var(--font-display)"></span>
     </div>
 
+    <!-- Pause -->
+    <div id="pause-banner" class="hidden mb" style="padding:.75rem 1rem;background:rgba(255,214,10,.12);border:1px solid var(--gold);border-radius:12px;color:var(--gold);font-size:.85rem;text-align:center">
+      ⏸ Runde pausiert — Timer &amp; Musik angehalten
+    </div>
+
     <!-- Spotify Status -->
     <div id="spotify-bar" class="spotify-bar disconnected mb">
       <span id="spotify-icon" style="font-size:1.2rem">🔇</span>
@@ -68,6 +73,21 @@
         <select id="select-auto-playlist" class="select"></select>
       </div>
       <p id="auto-moderator-status" class="hidden" style="font-size:.8rem;color:var(--green);margin-top:.75rem">🤖 Automatischer Moderator läuft — die Steuerung unten übernimmt der Server.</p>
+    </div>
+
+    <!-- Playlists -->
+    <div class="card mb" style="max-width:650px">
+      <div class="flex justify-between items-center gap-sm">
+        <div style="font-weight:600">🎧 Playlists</div>
+        <button id="btn-toggle-add-playlist" class="btn btn-secondary" style="font-size:.7rem;padding:.35rem .6rem">+ Neue Playlist</button>
+      </div>
+      <div id="playlist-list" class="mt"></div>
+      <form id="add-playlist-form" class="hidden mt" style="border-top:1px solid var(--border);padding-top:.75rem">
+        <input id="input-playlist-name" class="input mb" placeholder="Name der Playlist">
+        <input id="input-playlist-url" class="input mb" placeholder="Spotify-Playlist-Link">
+        <p id="add-playlist-error" class="hidden" style="color:var(--pink);font-size:.8rem;margin-bottom:.5rem"></p>
+        <button type="submit" class="btn btn-primary w-full">Hinzufügen</button>
+      </form>
     </div>
 
     <!-- Controls -->

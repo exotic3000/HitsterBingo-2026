@@ -116,6 +116,32 @@
       margin-top: 2rem;
     }
 
+    /* ── Pause Overlay ───────────────────────────────────────── */
+    .pause-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 400;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      background: rgba(10,14,39,.88);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .3s ease;
+    }
+    .pause-overlay.visible { opacity: 1; pointer-events: auto; }
+    .pause-overlay-icon { font-size: 4.5rem; filter: drop-shadow(0 0 20px rgba(255,214,10,.5)); }
+    .pause-overlay-title {
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 6vw, 3.5rem);
+      font-weight: 900;
+      letter-spacing: .1em;
+      color: var(--gold);
+    }
+    .pause-overlay-sub { color: var(--text-dim); font-size: 1rem; }
+
     /* ── Bingo Celebration ────────────────────────────────────── */
     .bingo-celebration {
       position: fixed;
@@ -349,6 +375,11 @@
     </div>
   </div>
   <canvas id="particles-canvas"></canvas>
+  <div id="pause-overlay" class="pause-overlay">
+    <div class="pause-overlay-icon">⏸</div>
+    <div class="pause-overlay-title">PAUSE</div>
+    <div class="pause-overlay-sub">Es geht gleich weiter...</div>
+  </div>
   <div id="bingo-celebration" class="bingo-celebration">
     <div class="bingo-celebration-content">
       <div class="bingo-celebration-emoji" id="bingo-celebration-emoji"></div>

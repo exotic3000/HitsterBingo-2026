@@ -23,7 +23,8 @@
     // Round
     if (state.currentCategory && gs !== 'lobby') {
       show('sec-category');
-      document.getElementById('ov-round').textContent = 'Runde ' + (state.currentRound + 1);
+      document.getElementById('ov-round').textContent =
+        'Runde ' + (state.currentRound + 1) + (state.paused ? ' · ⏸ Pausiert' : '');
     } else {
       hide('sec-category');
     }

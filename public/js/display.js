@@ -443,6 +443,7 @@
 
   socket.on('game_state', function(state) {
     renderRoomBadge(state);
+    document.getElementById('pause-overlay').classList.toggle('visible', !!state.paused);
     categories = state.categories || [];
     var teams = Object.values(state.teams);
     var gs = state.gameState;

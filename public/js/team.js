@@ -215,7 +215,14 @@
 
       if (submitted) {
         hide('answer-form');
+        hide('pause-notice');
         show('answer-sent');
+      } else if (state.paused) {
+        hide('answer-form');
+        show('pause-notice');
+      } else {
+        hide('pause-notice');
+        show('answer-form');
       }
     }
 

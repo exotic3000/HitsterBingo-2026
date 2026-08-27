@@ -12,6 +12,7 @@
   let searchTimeout = null;
   let spotifyConnected = false;
   let currentGameState = null;
+  let gamePaused = false;
 
   function makeBtn(text, cls, handler) {
     const b = document.createElement('button');
@@ -91,22 +92,96 @@
       '<span style="color:var(--green);font-size:.8rem">Ausgewählt ✓</span></div>';
   }
 
-  // ── Random song from playlist ──────────────────────────────────
+  // ── Playlists ─────────────────────────────────────────────────
 
   const randomBtn = document.getElementById('btn-random-song');
   const playlistSelect = document.getElementById('select-playlist');
   const autoPlaylistSelect = document.getElementById('select-auto-playlist');
+  const playlistListEl = document.getElementById('playlist-list');
+  const addPlaylistForm = document.getElementById('add-playlist-form');
+  const addPlaylistError = document.getElementById('add-playlist-error');
+  const btnToggleAddPlaylist = document.getElementById('btn-toggle-add-playlist');
+  const inputPlaylistName = document.getElementById('input-playlist-name');
+  const inputPlaylistUrl = document.getElementById('input-playlist-url');
 
-  fetch('/api/spotify/playlists')
-    .then((r) => r.json())
-    .then((data) => {
-      const options = (data.playlists || [])
-        .map((p) => '<option value="' + p.index + '">' + p.name + '</option>')
-        .join('');
-      playlistSelect.innerHTML = options;
-      autoPlaylistSelect.innerHTML = options;
-    })
-    .catch(() => {});
+  async function loadPlaylists() {
+    try {
+      const resp = await fetch('/api/spotify/playlists');
+      const data = await resp.json();
+      renderPlaylists(data.playlists || []);
+    } catch (e) { /* keep showing whatever was there before */ }
+  }
+
+  function renderPlaylists(playlists) {
+    // Keep whatever was already picked, if it's still around, instead of
+    // silently resetting the moderator's selection on every refresh.
+    const prevManual = playlistSelect.value;
+    const prevAuto = autoPlaylistSelect.value;
+
+    const options = playlists.map((p) => '<option value="' + p.id + '">' + p.name + '</option>').join('');
+    playlistSelect.innerHTML = options;
+    autoPlaylistSelect.innerHTML = options;
+    if (playlists.some((p) => p.id === prevManual)) playlistSelect.value = prevManual;
+    if (playlists.some((p) => p.id === prevAuto)) autoPlaylistSelect.value = prevAuto;
+
+    playlistListEl.innerHTML = playlists.map((p) =>
+      '<div class="flex justify-between items-center" style="padding:.4rem 0">' +
+        '<span style="font-size:.85rem">' + p.name + '</span>' +
+        '<button type="button" class="btn btn-secondary" data-delete-playlist="' + p.id + '" ' +
+        'style="font-size:.7rem;padding:.25rem .5rem" ' + (playlists.length <= 1 ? 'disabled title="Mindestens eine Playlist muss übrig bleiben"' : '') + '>✕</button>' +
+      '</div>'
+    ).join('');
+
+    playlistListEl.querySelectorAll('[data-delete-playlist]').forEach((btn) => {
+      btn.addEventListener('click', () => deletePlaylist(btn.dataset.deletePlaylist));
+    });
+  }
+
+  btnToggleAddPlaylist.addEventListener('click', () => {
+    addPlaylistForm.classList.toggle('hidden');
+    addPlaylistError.classList.add('hidden');
+    if (!addPlaylistForm.classList.contains('hidden')) inputPlaylistName.focus();
+  });
+
+  addPlaylistForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    addPlaylistError.classList.add('hidden');
+    const name = inputPlaylistName.value.trim();
+    const url = inputPlaylistUrl.value.trim();
+    try {
+      const resp = await fetch('/api/spotify/playlists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        addPlaylistError.textContent = data.error || 'Playlist konnte nicht hinzugefügt werden.';
+        addPlaylistError.classList.remove('hidden');
+        return;
+      }
+      inputPlaylistName.value = '';
+      inputPlaylistUrl.value = '';
+      addPlaylistForm.classList.add('hidden');
+      renderPlaylists(data.playlists);
+    } catch (e) {
+      addPlaylistError.textContent = 'Fehler: ' + e.message;
+      addPlaylistError.classList.remove('hidden');
+    }
+  });
+
+  async function deletePlaylist(id) {
+    if (!confirm('Diese Playlist wirklich entfernen?')) return;
+    const resp = await fetch('/api/spotify/playlists/' + encodeURIComponent(id), { method: 'DELETE' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert(data.error || 'Playlist konnte nicht entfernt werden.');
+      return;
+    }
+    renderPlaylists(data.playlists);
+  }
+
+  loadPlaylists();
 
   async function doRandomSong() {
     resultsEl.innerHTML = '<p style="color:var(--text-dim);padding:.5rem">Wähle zufälligen Song...</p>';
@@ -168,7 +243,7 @@
     autoToggle.disabled = true;
     socket.emit('set_auto_moderator', {
       enabled,
-      playlist: parseInt(autoPlaylistSelect.value || '0'),
+      playlist: autoPlaylistSelect.value || null,
     }, (res) => {
       autoToggle.disabled = false;
       if (!res || !res.ok) {
@@ -214,6 +289,14 @@
 
   function doReset() {
     socket.emit('reset_game');
+  }
+
+  function doPause() {
+    socket.emit('pause_game');
+  }
+
+  function doResume() {
+    socket.emit('resume_game');
   }
 
   // ── Keyboard shortcuts ───────────────────────────────────────────
@@ -272,6 +355,10 @@
       case 'R':
         doReset();
         break;
+      case 'p':
+      case 'P':
+        if (currentGameState === 'playing') gamePaused ? doResume() : doPause();
+        break;
     }
   });
 
@@ -281,6 +368,8 @@
     renderRoomBadge(state);
     const gs = state.gameState;
     currentGameState = gs;
+    gamePaused = !!state.paused;
+    document.getElementById('pause-banner').classList.toggle('hidden', !gamePaused);
     const teams = Object.values(state.teams);
 
     // Spotify status bar
@@ -305,8 +394,8 @@
     // Automatischer Moderator
     autoModeratorEnabled = !!state.autoModeratorEnabled;
     autoToggle.checked = autoModeratorEnabled;
-    if (typeof state.autoModeratorPlaylist === 'number') {
-      autoPlaylistSelect.value = String(state.autoModeratorPlaylist);
+    if (state.autoModeratorPlaylist) {
+      autoPlaylistSelect.value = state.autoModeratorPlaylist;
     }
     autoSettingsEl.classList.toggle('hidden', autoModeratorEnabled);
     autoStatusEl.classList.toggle('hidden', !autoModeratorEnabled);
@@ -326,6 +415,9 @@
         controlsEl.appendChild(makeBtn('Kategorie neu drehen (K)', 'btn-secondary', doRedrawCategory));
       }
       if (gs === 'playing') {
+        controlsEl.appendChild(gamePaused
+          ? makeBtn('▶ Fortsetzen (P)', 'btn-primary', doResume)
+          : makeBtn('⏸ Pause (P)', 'btn-secondary', doPause));
         controlsEl.appendChild(makeBtn('Lösung zeigen (L)', 'btn-danger', doRevealSolution));
       }
       if (gs === 'revealing') {
