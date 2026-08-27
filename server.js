@@ -154,6 +154,12 @@ const BINGO_SIZE = 5;
 const TIMER_SECONDS = 60;
 const TEAM_DISCONNECT_GRACE_MS = 450000;
 
+// Vermeidet, dass kurz hintereinander derselbe Song aus derselben Playlist
+// gezogen wird — wie Spotifys "kein Wiederholen"-Shuffle. In
+// fetchRandomPlaylistTrack auf die tatsächliche Playlistgröße gedeckelt,
+// damit kleine Playlists sich nicht selbst blockieren.
+const RECENT_TRACK_HISTORY_LIMIT = 15;
+
 // Also drop a room's Spotify connection once nobody has any tab of that
 // room open at all. A short grace period tolerates a page reload or brief
 // network hiccup (same pattern as team reconnects) without forcing a fresh
@@ -343,6 +349,11 @@ function createSession(roomCode, name, restore) {
   let currentCategory = (restore && restore.currentCategory) || null;
   let currentMysterySub = (restore && restore.currentMysterySub) || null;
   let currentSong = (restore && restore.currentSong) || null;
+  // Verhindert, dass zwei Runden in Folge dieselbe Kategorie ziehen.
+  let lastCategoryId = (restore && restore.lastCategoryId) || null;
+  // playlistId -> zuletzt gespielte Spotify-Track-IDs dieser Playlist, damit
+  // derselbe Song nicht sofort wieder gezogen wird.
+  const recentTracksByPlaylist = new Map(restore && restore.recentTracksByPlaylist ? restore.recentTracksByPlaylist : undefined);
   let timerValue = restore && typeof restore.timerValue === 'number' ? restore.timerValue : TIMER_SECONDS;
   let timerInterval = null;
   // Freezes the countdown + Spotify playback for a "playing" round without
@@ -548,6 +559,13 @@ function createSession(roomCode, name, restore) {
     broadcast();
   }
 
+  function rememberPlayedTrack(playlistId, trackId, cap) {
+    const history = recentTracksByPlaylist.get(playlistId) || [];
+    history.push(trackId);
+    while (history.length > cap) history.shift();
+    recentTracksByPlaylist.set(playlistId, history);
+  }
+
   // Shared by the moderator's "Zufälliger Song" button and the automatic
   // moderator loop, so both pick songs the exact same way.
   async function fetchRandomPlaylistTrack(wantedId) {
@@ -568,7 +586,14 @@ function createSession(roomCode, name, restore) {
     const total = meta.items?.total || 0;
     if (!total) throw httpError(404, 'Playlist ist leer — Spotify-Antwort: ' + JSON.stringify(meta));
 
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // Songs, die zuletzt aus derselben Playlist gezogen wurden, werden nach
+    // Möglichkeit übersprungen — gedeckelt auf die Playlistgröße, damit eine
+    // kleine Playlist sich nicht selbst blockiert.
+    const historyCap = Math.max(0, Math.min(RECENT_TRACK_HISTORY_LIMIT, total - 1));
+    const recent = historyCap > 0 ? (recentTracksByPlaylist.get(playlist.id) || []).slice(-historyCap) : [];
+
+    let fallback = null;
+    for (let attempt = 0; attempt < 8; attempt++) {
       const offset = Math.floor(Math.random() * total);
       const resp = await fetch(
         'https://api.spotify.com/v1/playlists/' + playlistId + '/items?' + querystring.stringify({
@@ -580,9 +605,20 @@ function createSession(roomCode, name, restore) {
       const data = await resp.json();
       const entry = data.items?.[0];
       const track = entry?.item;
-      if (track && !entry.is_local && track.uri) {
+      if (!track || entry.is_local || !track.uri) continue;
+
+      if (!recent.includes(track.id)) {
+        rememberPlayedTrack(playlist.id, track.id, historyCap);
         return mapTrack(track);
       }
+      if (!fallback) fallback = track;
+    }
+
+    // Im Versuchsbudget keinen "frischen" Song gefunden (z.B. sehr kleine
+    // Playlist) — lieber eine Wiederholung als eine gescheiterte Runde.
+    if (fallback) {
+      rememberPlayedTrack(playlist.id, fallback.id, historyCap);
+      return mapTrack(fallback);
     }
     throw httpError(404, 'Kein abspielbarer Song in der Playlist gefunden');
   }
@@ -592,11 +628,20 @@ function createSession(roomCode, name, restore) {
   // automatic moderator loop below, so both drive the exact same state
   // transitions instead of duplicating the logic.
 
+  // Schließt die zuletzt gezogene Kategorie aus, damit z.B. "Mystery" nicht
+  // zwei Runden in Folge (oder öfter) kommt.
+  function pickCategory() {
+    const pool = lastCategoryId ? CATEGORIES.filter((c) => c.id !== lastCategoryId) : CATEGORIES;
+    const cat = pool[Math.floor(Math.random() * pool.length)];
+    lastCategoryId = cat.id;
+    return cat;
+  }
+
   function doStartSpin() {
     paused = false;
     gameState = 'spinning';
     spinToken++;
-    currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+    currentCategory = pickCategory();
     currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
     answers.clear();
     broadcast();
@@ -656,7 +701,7 @@ function createSession(roomCode, name, restore) {
     paused = false;
     clearTimer();
     spinToken++;
-    currentCategory = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+    currentCategory = pickCategory();
     currentMysterySub = currentCategory.id === 'mystery' ? pickWeightedRandom(MYSTERY_SUBS) : null;
     currentSong = null;
     answers.clear();
@@ -690,6 +735,7 @@ function createSession(roomCode, name, restore) {
     currentCategory = null;
     currentMysterySub = null;
     currentSong = null;
+    lastCategoryId = null;
     answers.clear();
     gameState = 'lobby';
     for (const [, team] of teams) {
@@ -854,6 +900,8 @@ function createSession(roomCode, name, restore) {
       timerValue,
       paused,
       autoModeratorPlaylist,
+      lastCategoryId,
+      recentTracksByPlaylist: [...recentTracksByPlaylist.entries()],
     };
   }
 
