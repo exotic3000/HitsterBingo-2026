@@ -494,8 +494,68 @@ function createSession(roomCode, name, restore) {
     };
   }
 
+  // ── Per-view state delivery ───────────────────────────────────────
+  // Every connected tab gets only what its view actually shows, and only
+  // when that changed for it. Before, each tap (an answer, a ticked cell)
+  // pushed the whole state — every team's card and every answer — to every
+  // device in the room; on a weak venue network that's what made the game
+  // feel sluggish, and it let any team read the others' answers.
+  const viewers = new Map(); // socket.id -> { socket, role, teamId, lastSent }
+
+  function teamName(t) {
+    return { id: t.id, name: t.name, emoji: t.emoji };
+  }
+
+  function stateForView(full, role, teamId) {
+    if (role === 'moderator') return full;
+    const all = [...teams.values()];
+    let viewTeams;
+    let viewAnswers = {};
+
+    if (role === 'overview') {
+      viewTeams = full.teams;
+    } else if (role === 'display') {
+      // Bingo celebration + lobby list; dots only need whether a team answered.
+      viewTeams = Object.fromEntries(all.map((t) => [t.id, { ...teamName(t), hasBingo: t.hasBingo }]));
+      for (const id of answers.keys()) viewAnswers[id] = true;
+    } else {
+      // Team phones (and the team setup screen before joining): own card and
+      // answer only; other teams just by name/emoji, so taken ones grey out.
+      viewTeams = Object.fromEntries(all.map((t) => [t.id, t.id === teamId ? t : teamName(t)]));
+      if (teamId && answers.has(teamId)) viewAnswers[teamId] = answers.get(teamId);
+    }
+    return { ...full, teams: viewTeams, answers: viewAnswers };
+  }
+
+  function sendState(viewer, full, force) {
+    const view = stateForView(full, viewer.role, viewer.teamId);
+    const json = JSON.stringify(view);
+    if (!force && json === viewer.lastSent) return;
+    viewer.lastSent = json;
+    viewer.socket.emit('game_state', view);
+  }
+
   function broadcast() {
-    io.to('room:' + roomCode).emit('game_state', getFullState());
+    const full = getFullState();
+    for (const viewer of viewers.values()) sendState(viewer, full, false);
+  }
+
+  function addViewer(socket) {
+    const viewer = { socket, role: null, teamId: null, lastSent: null };
+    viewers.set(socket.id, viewer);
+    sendState(viewer, getFullState(), true);
+  }
+
+  function setViewerRole(socketId, role, teamId) {
+    const viewer = viewers.get(socketId);
+    if (!viewer) return;
+    viewer.role = role;
+    viewer.teamId = teamId || null;
+    sendState(viewer, getFullState(), true);
+  }
+
+  function removeViewer(socketId) {
+    viewers.delete(socketId);
   }
 
   function clearTimer() {
@@ -1077,6 +1137,9 @@ function createSession(roomCode, name, restore) {
     snapshot,
     registerConnection,
     unregisterConnection,
+    addViewer,
+    setViewerRole,
+    removeViewer,
     resolveTeamJoin,
     handleTeamDisconnect,
     submitAnswer,
@@ -1400,7 +1463,7 @@ io.on('connection', (socket) => {
   socket.roomCode = roomCode;
   session.registerConnection();
   socket.join('room:' + roomCode);
-  socket.emit('game_state', session.getFullState());
+  session.addViewer(socket);
 
   socket.on('join', (data, ack) => {
     const { role } = data || {};
@@ -1416,7 +1479,7 @@ io.on('connection', (socket) => {
     }
 
     socket.join(role);
-    socket.emit('game_state', session.getFullState());
+    session.setViewerRole(socket.id, role, teamId);
     session.broadcast();
     reply({ ok: true, teamId: role === 'team' ? teamId : undefined });
   });
@@ -1500,6 +1563,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     session.unregisterPlayer(socket.id);
+    session.removeViewer(socket.id);
     session.unregisterConnection();
     if (socket.teamId) session.handleTeamDisconnect(socket.teamId);
   });

@@ -22,6 +22,8 @@ Der Server läuft standardmäßig auf Port 3000. Für Spotify-Songwiedergabe mü
 | QR-Code | `/qr.html` | Beitritts-Code zum Scannen, separat anzeigbar |
 | Übersicht | `/overview.html` | Alle Bingokarten, Rangliste & Runde auf einen Blick |
 
+Jede Ansicht bekommt vom Server nur die Daten, die sie anzeigt, und nur, wenn sich dafür etwas geändert hat. Team-Handys sehen ihre eigene Bingokarte und Antwort, aber keine fremden; der Beamer erfährt nur, *ob* ein Team geantwortet hat.
+
 Alle Ansichten außer `/team.html` sind mit dem Site-Passwort geschützt (`SITE_PASSWORD`, Standard `OutOfOrbit26`).
 
 ## Normaler Spielablauf (mit Moderation)

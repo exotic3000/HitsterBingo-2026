@@ -72,8 +72,12 @@ test('a round survives a restart: teams, score, current song and the running tim
   assert.equal(restored.teamCount, 1);
   assert.equal(restored.gameState, 'playing');
 
+  // Joined as the overview — it's the view that shows every team's score.
   const team2 = connectSocket(server.base, roomCode);
-  const state = await waitForEvent(team2, 'game_state');
+  await waitForEvent(team2, 'game_state');
+  const joinedState = waitForEvent(team2, 'game_state');
+  team2.emit('join', { role: 'overview' });
+  const state = await joinedState;
 
   assert.equal(state.teams[teamId].name, 'Alpha');
   assert.equal(state.teams[teamId].score, scoreBeforeRestart);
