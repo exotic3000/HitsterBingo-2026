@@ -60,14 +60,30 @@ app.use((req, res, next) => {
   res.redirect('/login.html?redirect=' + encodeURIComponent(req.originalUrl));
 });
 
-// Cloudflare rewrites the browser-facing Cache-Control for static assets to
-// its own ~4h default regardless of what the origin sends, so a plain
-// no-cache header alone isn't enough — phones kept showing stale CSS/JS
-// after a fix went live. Instead, every HTML page gets its /css and /js
-// references stamped with a version query string that changes on every
-// server start, so each deploy is a brand new URL Cloudflare has never
-// cached, sidestepping the edge cache entirely.
-const ASSET_VERSION = Date.now();
+// Every HTML page gets its /css and /js references (and the Socket.IO
+// client) stamped with a version query string that changes on every server
+// start. A stamped URL therefore never changes content, so it's served as
+// immutable: Cloudflare keeps it at the edge and phones keep it locally,
+// instead of every page load going through the tunnel to this server to
+// revalidate each file — which hurt most when a whole room scanned the QR
+// code at once. Each deploy is a brand-new URL, so fixes still go live
+// immediately. Unstamped or outdated URLs stay no-cache.
+const ASSET_VERSION = String(Date.now());
+const IMMUTABLE = 'public, max-age=31536000, immutable';
+
+function assetCacheControl(req) {
+  return req.query.v === ASSET_VERSION ? IMMUTABLE : 'no-cache';
+}
+
+// Served from our own path (minified, 47 KB instead of the 156 KB
+// unminified build behind /socket.io/socket.io.js) so it gets the same
+// versioned, edge-cached treatment as our own scripts.
+const SOCKET_IO_CLIENT = path.join(path.dirname(require.resolve('socket.io/package.json')), 'client-dist', 'socket.io.min.js');
+
+app.get('/vendor/socket.io.min.js', (req, res) => {
+  res.set('Cache-Control', assetCacheControl(req));
+  res.sendFile(SOCKET_IO_CLIENT);
+});
 
 app.use((req, res, next) => {
   const reqPath = req.path === '/' ? '/index.html' : req.path;
@@ -75,21 +91,22 @@ app.use((req, res, next) => {
   const filePath = path.join(__dirname, 'public', reqPath);
   fs.readFile(filePath, 'utf8', (err, html) => {
     if (err) return next();
-    const versioned = html.replace(
-      /(href|src)="(\/(?:css|js)\/[^"?]+)"/g,
-      (m, attr, url) => attr + '="' + url + '?v=' + ASSET_VERSION + '"'
-    );
+    const versioned = html
+      .replace('src="/socket.io/socket.io.js"', 'src="/vendor/socket.io.min.js"')
+      .replace(
+        /(href|src)="(\/(?:css|js|vendor)\/[^"?]+)"/g,
+        (m, attr, url) => attr + '="' + url + '?v=' + ASSET_VERSION + '"'
+      );
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.set('Cache-Control', 'no-cache');
     res.send(versioned);
   });
 });
 
-// no-cache (not no-store): browsers/Cloudflare still keep a copy but must
-// revalidate via ETag on every load, so edits go live immediately instead of
-// being stuck behind Cloudflare's ~4h default browser cache TTL.
+// HTML itself stays no-cache (revalidated via ETag on every load), so a new
+// deploy's version stamps reach every device straight away.
 app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+  setHeaders: (res) => res.setHeader('Cache-Control', assetCacheControl(res.req)),
 }));
 app.use(express.json());
 console.log('[3] Middleware OK, weiter zu Routes...');
