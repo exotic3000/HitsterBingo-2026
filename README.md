@@ -66,6 +66,7 @@ Wichtige Umgebungsvariablen (alle optional, mit sinnvollen Defaults in `server.j
 - `SITE_PASSWORD` — Passwort für die geschützten Ansichten
 - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI` — Spotify-App-Zugangsdaten
 - `PORT` — Server-Port (Standard 3000)
+- `PLAYLIST_CACHE_TTL_MS` — wie lange eine geladene Playlist zwischengespeichert wird (Standard 1800000 = 30 Minuten)
 - `PLAYBACK_CONFIRM_TIMEOUT_MS` — wie lange der Timer nach dem Songstart höchstens auf die Rückmeldung „Song läuft“ vom Beamer wartet (Standard 6000)
 
-Playlists für den zufälligen Songwähler (manuell wie automatisch) werden direkt in `server.js` unter `SPOTIFY_PLAYLISTS` gepflegt.
+Playlists für den zufälligen Songwähler (manuell wie automatisch) werden in der Moderationsansicht im Kasten „Playlists“ verwaltet; `SPOTIFY_PLAYLISTS` in `server.js` liefert nur die Startwerte. Der Server lädt jede Playlist einmal komplett und hält sie 30 Minuten vor — ein Zufallssong braucht dann keine Anfrage an Spotify. Änderungen an einer Playlist in Spotify erscheinen deshalb spätestens nach 30 Minuten (oder sofort nach einem Server-Neustart).

@@ -272,6 +272,70 @@ function extractPlaylistId(input) {
   return null;
 }
 
+// ── Playlist cache (shared by every room) ───────────────────────────
+// Each playlist is loaded once in full and kept for a while, so a random
+// song costs no Spotify request at all instead of up to nine sequential
+// ones (size lookup + random single-track probes) over the server's uplink.
+// Shared across rooms: the playlist content is the same no matter whose
+// Spotify login fetched it. Re-fetched after the TTL so edits made in
+// Spotify still show up during a long event.
+const PLAYLIST_CACHE_TTL_MS = Number(process.env.PLAYLIST_CACHE_TTL_MS) || 30 * 60 * 1000;
+const playlistCache = new Map(); // Spotify playlist id -> { tracks, fetchedAt }
+const playlistLoads = new Map(); // Spotify playlist id -> in-flight load, shared by concurrent callers
+
+async function fetchAllPlaylistTracks(spotifyPlaylistId, token) {
+  const tracks = [];
+  let url = SPOTIFY_API_BASE + '/playlists/' + spotifyPlaylistId + '/items?' + querystring.stringify({
+    limit: 50, offset: 0, market: 'DE',
+    fields: 'next,items(is_local,item(type,name,uri,id,artists(name),album(name,release_date,images),preview_url,duration_ms))',
+  });
+  while (url) {
+    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw httpError(resp.status, data.error?.message || 'Playlist nicht gefunden');
+    for (const entry of data.items || []) {
+      const t = entry && entry.item;
+      // Skips local files and podcast episodes — neither can be played or quizzed.
+      if (!t || entry.is_local || !t.uri || !t.id || (t.type && t.type !== 'track')) continue;
+      tracks.push(mapTrack(t));
+    }
+    url = data.next || null;
+  }
+  return tracks;
+}
+
+async function getPlaylistTracks(spotifyPlaylistId, token) {
+  const cached = playlistCache.get(spotifyPlaylistId);
+  if (cached && Date.now() - cached.fetchedAt < PLAYLIST_CACHE_TTL_MS) return cached.tracks;
+
+  if (!playlistLoads.has(spotifyPlaylistId)) {
+    const load = fetchAllPlaylistTracks(spotifyPlaylistId, token)
+      .then((tracks) => {
+        playlistCache.set(spotifyPlaylistId, { tracks, fetchedAt: Date.now() });
+        return tracks;
+      })
+      .finally(() => playlistLoads.delete(spotifyPlaylistId));
+    playlistLoads.set(spotifyPlaylistId, load);
+  }
+  try {
+    return await playlistLoads.get(spotifyPlaylistId);
+  } catch (e) {
+    // A failed refresh shouldn't break the round while an older copy exists.
+    if (cached) return cached.tracks;
+    throw e;
+  }
+}
+
+// Loads every configured playlist in the background right after a Spotify
+// login, so even the first random song of the evening comes straight from
+// the cache. Failures are ignored here — the next real pick retries.
+function warmPlaylistCache(token) {
+  for (const p of SPOTIFY_PLAYLISTS) {
+    const id = extractPlaylistId(p.url);
+    if (id) getPlaylistTracks(id, token).catch(() => {});
+  }
+}
+
 function httpError(status, message) {
   const err = new Error(message);
   err.status = status;
@@ -788,51 +852,20 @@ function createSession(roomCode, name, restore) {
     const playlistId = extractPlaylistId(playlist?.url);
     if (!playlistId) throw httpError(400, 'Keine Playlist hinterlegt — bitte in der Moderation eine hinzufügen.');
 
-    const metaResp = await fetch(
-      SPOTIFY_API_BASE + '/playlists/' + playlistId + '?fields=items.total',
-      { headers: { 'Authorization': 'Bearer ' + token } }
-    );
-    const meta = await metaResp.json();
-    if (!metaResp.ok) throw httpError(metaResp.status, meta.error?.message || 'Playlist nicht gefunden');
+    const tracks = await getPlaylistTracks(playlistId, token);
+    if (!tracks.length) throw httpError(404, 'Playlist ist leer oder enthält keine abspielbaren Songs.');
 
-    const total = meta.items?.total || 0;
-    if (!total) throw httpError(404, 'Playlist ist leer — Spotify-Antwort: ' + JSON.stringify(meta));
-
-    // Songs, die zuletzt aus derselben Playlist gezogen wurden, werden nach
-    // Möglichkeit übersprungen — gedeckelt auf die Playlistgröße, damit eine
-    // kleine Playlist sich nicht selbst blockiert.
-    const historyCap = Math.max(0, Math.min(RECENT_TRACK_HISTORY_LIMIT, total - 1));
+    // Songs, die zuletzt aus derselben Playlist gezogen wurden, werden
+    // übersprungen — gedeckelt auf die Playlistgröße, damit eine kleine
+    // Playlist sich nicht selbst blockiert.
+    const historyCap = Math.max(0, Math.min(RECENT_TRACK_HISTORY_LIMIT, tracks.length - 1));
     const recent = historyCap > 0 ? (recentTracksByPlaylist.get(playlist.id) || []).slice(-historyCap) : [];
+    const fresh = tracks.filter((t) => !recent.includes(t.spotifyId));
+    const pool = fresh.length ? fresh : tracks;
 
-    let fallback = null;
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const offset = Math.floor(Math.random() * total);
-      const resp = await fetch(
-        SPOTIFY_API_BASE + '/playlists/' + playlistId + '/items?' + querystring.stringify({
-          limit: 1, offset, market: 'DE',
-          fields: 'items(is_local,item(name,uri,id,artists,album,preview_url,duration_ms))',
-        }),
-        { headers: { 'Authorization': 'Bearer ' + token } }
-      );
-      const data = await resp.json();
-      const entry = data.items?.[0];
-      const track = entry?.item;
-      if (!track || entry.is_local || !track.uri) continue;
-
-      if (!recent.includes(track.id)) {
-        rememberPlayedTrack(playlist.id, track.id, historyCap);
-        return mapTrack(track);
-      }
-      if (!fallback) fallback = track;
-    }
-
-    // Im Versuchsbudget keinen "frischen" Song gefunden (z.B. sehr kleine
-    // Playlist) — lieber eine Wiederholung als eine gescheiterte Runde.
-    if (fallback) {
-      rememberPlayedTrack(playlist.id, fallback.id, historyCap);
-      return mapTrack(fallback);
-    }
-    throw httpError(404, 'Kein abspielbarer Song in der Playlist gefunden');
+    const track = pool[Math.floor(Math.random() * pool.length)];
+    rememberPlayedTrack(playlist.id, track.spotifyId, historyCap);
+    return { ...track };
   }
 
   // ── Round actions ────────────────────────────────────────────────
@@ -1345,6 +1378,7 @@ app.get('/auth/spotify/callback', async (req, res) => {
     if (data.error) return res.send('Token-Fehler: ' + data.error_description);
 
     session.setSpotifyTokens(data.access_token, data.refresh_token, data.expires_in);
+    warmPlaylistCache(data.access_token);
     res.send('<html><body style="background:#0a0e27;color:#4cc9f0;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;font-size:1.5rem"><div style="text-align:center">✅ Spotify verbunden!<br><br><small style="color:#8892b0">Du kannst dieses Fenster schließen.</small></div></body></html>');
   } catch (e) {
     res.status(500).send('Fehler: ' + e.message);
