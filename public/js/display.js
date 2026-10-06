@@ -48,6 +48,11 @@
   resizeParticles();
   window.addEventListener('resize', resizeParticles);
 
+  // The particle loop only runs while there are particles — an idle loop
+  // used to clear and redraw this full-screen canvas 60 times a second for
+  // the whole show, competing with the Spotify player for the Beamer's CPU.
+  let particlesRunning = false;
+
   function spawnBurst(cx, cy, color, count) {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
@@ -61,6 +66,10 @@
         size: 2 + Math.random() * 4,
         color: color,
       });
+    }
+    if (!particlesRunning) {
+      particlesRunning = true;
+      requestAnimationFrame(tickParticles);
     }
   }
 
@@ -82,9 +91,9 @@
     }
     pCtx.globalAlpha = 1;
     pCtx.shadowBlur = 0;
-    requestAnimationFrame(tickParticles);
+    if (particles.length) requestAnimationFrame(tickParticles);
+    else particlesRunning = false;
   }
-  tickParticles();
 
   // ── Wheel ──────────────────────────────────────────────────────
 
@@ -202,22 +211,16 @@
     ctx.restore();
   }
 
-  // Idle floating animation when not spinning
-  let idleAnimId = null;
+  // Idle floating when not spinning: the wheel is drawn once and the gentle
+  // ±2° sway runs as a CSS rotation the GPU handles on its own, instead of
+  // repainting the whole wheel (gradients, glow shadows) every frame.
   function startIdleFloat() {
-    stopIdleFloat();
-    var startTime = performance.now();
-    function tick(now) {
-      if (isSpinning) return;
-      var t = (now - startTime) / 1000;
-      var drift = Math.sin(t * 0.3) * 2;
-      drawWheel(wheelAngle + drift, null);
-      idleAnimId = requestAnimationFrame(tick);
-    }
-    idleAnimId = requestAnimationFrame(tick);
+    if (isSpinning) return;
+    drawWheel(wheelAngle, null);
+    canvas.classList.add('idle-float');
   }
   function stopIdleFloat() {
-    if (idleAnimId) { cancelAnimationFrame(idleAnimId); idleAnimId = null; }
+    canvas.classList.remove('idle-float');
   }
 
   function spinWheel(targetCatId) {

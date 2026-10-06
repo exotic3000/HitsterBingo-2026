@@ -22,6 +22,17 @@
       height: 100%;
       filter: drop-shadow(0 0 30px rgba(124,58,237,.4));
     }
+    .wheel-stage canvas.idle-float {
+      animation: wheelDrift 10.5s ease-in-out infinite alternate;
+      will-change: transform;
+    }
+    @keyframes wheelDrift {
+      from { transform: rotate(-2deg); }
+      to   { transform: rotate(2deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .wheel-stage canvas.idle-float { animation: none; }
+    }
 
     .wheel-pointer-svg {
       position: absolute;
@@ -187,6 +198,12 @@
       60%  { transform: scale(1.15) rotate(3deg); opacity: 1; }
       100% { transform: scale(1) rotate(0); opacity: 1; }
     }
+    /* Only animate while shown — hidden by opacity alone, these loops kept
+       repainting for the whole show, and the pop-in had long finished by
+       the time the first Bingo came. Restarting on .visible fixes both. */
+    .bingo-celebration:not(.visible) .bingo-celebration-content,
+    .bingo-celebration:not(.visible) .bingo-celebration-emoji,
+    .bingo-celebration:not(.visible) .bingo-celebration-title { animation: none; }
     @keyframes bingoGradient { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
     @keyframes bingoFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
 
