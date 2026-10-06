@@ -115,6 +115,15 @@ const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || 'f019a8aaafee49a99be7
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'b31d81165bba4bc1ab5e947a9889154b';
 const PORT = process.env.PORT || 3000;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:' + PORT + '/auth/spotify/callback';
+// Overridable so tests can point the server at a local fake Spotify API.
+const SPOTIFY_API_BASE = process.env.SPOTIFY_API_BASE || 'https://api.spotify.com/v1';
+
+// The countdown only starts once the Beamer's player reports the song is
+// actually audible, so a slow venue network doesn't eat into the teams'
+// listening time — but never waits longer than this, so a player that
+// never reports back can't stall the round (or the auto-moderator) forever.
+const PLAYBACK_CONFIRM_TIMEOUT_MS = Number(process.env.PLAYBACK_CONFIRM_TIMEOUT_MS) || 6000;
+const SPOTIFY_PLAY_ATTEMPTS = 3;
 
 // Public base URL used to build the join-QR link — same origin players scan
 // from their phones, so it has to be the tunnel/public domain, not localhost.
@@ -385,6 +394,24 @@ function createSession(roomCode, name, restore) {
   let spotifyDisconnectTimer = null;
   let lastEmptyAt = null; // when connectedSocketCount last hit 0 — drives room cleanup
 
+  // ── Beamer player (Web Playback SDK in display.html) ────────────
+  // Exactly one Beamer tab per room owns playback: the server talks to
+  // Spotify directly with that tab's device id, instead of bouncing every
+  // play/pause through the Beamer's browser and back (two fewer trips over
+  // the venue network, and no more tabs stealing playback from each other).
+  let playerDeviceId = null;
+  let playerSocketId = null;
+  // Shown on the moderator view until the next song actually plays — lives
+  // in game state (not a one-off event) so a reloaded moderator tab sees it too.
+  let playerIssue = null;
+  // Play/pause commands go out strictly in order — independent requests
+  // over a flaky network could otherwise land at Spotify as pause-after-play
+  // and silence the new song right away.
+  let playerQueue = Promise.resolve();
+  let playbackActive = false;
+  let awaitingPlayback = false;
+  let playbackWaitTimer = null;
+
   function clearAutoModeratorTimer() {
     if (autoModeratorTimer) {
       clearTimeout(autoModeratorTimer);
@@ -459,6 +486,9 @@ function createSession(roomCode, name, restore) {
       paused,
       categories: CATEGORIES,
       spotifyReady: !!spotifyAccessToken,
+      spotifyPlayerReady: !!playerDeviceId,
+      spotifyPlayerIssue: playerIssue,
+      awaitingPlayback,
       autoModeratorEnabled,
       autoModeratorPlaylist,
     };
@@ -473,6 +503,11 @@ function createSession(roomCode, name, restore) {
       clearInterval(timerInterval);
       timerInterval = null;
     }
+    if (playbackWaitTimer) {
+      clearTimeout(playbackWaitTimer);
+      playbackWaitTimer = null;
+    }
+    awaitingPlayback = false;
   }
 
   function startTimer() {
@@ -482,7 +517,7 @@ function createSession(roomCode, name, restore) {
       io.to('room:' + roomCode).emit('timer_tick', timerValue);
       if (timerValue <= 0) {
         clearTimer();
-        io.to('room:' + roomCode).emit('spotify_pause');
+        stopPlayback();
         broadcast();
         if (autoModeratorEnabled) scheduleAuto(doRevealSolution, AUTO_REVEAL_HOLD_MS);
       }
@@ -499,20 +534,16 @@ function createSession(roomCode, name, restore) {
     if (gameState !== 'playing' || paused) return;
     paused = true;
     clearTimer();
-    io.to('room:' + roomCode).emit('spotify_pause');
+    stopPlayback();
     broadcast();
   }
 
   function resumeGame() {
     if (!paused) return;
     paused = false;
+    // Continues the song where it was paused instead of restarting it.
+    if (gameState === 'playing') startRoundAudio({ resume: true });
     broadcast();
-    if (gameState === 'playing') {
-      startTimer();
-      if (currentSong && currentSong.spotifyUri) {
-        io.to('room:' + roomCode).emit('spotify_play', { uri: currentSong.spotifyUri });
-      }
-    }
   }
 
   // ── Spotify OAuth (per room) ────────────────────────────────────
@@ -559,6 +590,127 @@ function createSession(roomCode, name, restore) {
     broadcast();
   }
 
+  // ── Beamer playback ─────────────────────────────────────────────
+
+  function setPlayerIssue(message) {
+    if (playerIssue === message) return;
+    playerIssue = message;
+    broadcast();
+  }
+
+  // The newest Beamer tab wins; an older one is told to release its player
+  // so the two don't keep grabbing playback from each other.
+  function registerPlayer(socketId, deviceId) {
+    if (playerSocketId && playerSocketId !== socketId) {
+      io.to(playerSocketId).emit('spotify_player_replaced');
+    }
+    playerSocketId = socketId;
+    playerDeviceId = deviceId;
+    playbackActive = false;
+    playerIssue = null;
+    broadcast();
+  }
+
+  function unregisterPlayer(socketId) {
+    if (socketId !== playerSocketId) return;
+    playerSocketId = null;
+    playerDeviceId = null;
+    playbackActive = false;
+    broadcast();
+  }
+
+  function queuePlayerCommand(task) {
+    const run = playerQueue.then(task, task);
+    playerQueue = run.catch(() => {});
+    return run;
+  }
+
+  // One PUT to Spotify's player API for the registered Beamer device, retried
+  // on failure — right after the SDK connects, Spotify often answers 404
+  // "Device not found" for a moment, and venue networks drop requests.
+  async function sendPlayerCommand(action, body, attempts) {
+    let lastError = 'Unbekannter Fehler';
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const token = await getValidToken();
+      if (!token) return { ok: false, message: 'Spotify ist nicht verbunden.' };
+      if (!playerDeviceId) return { ok: false, message: 'Kein Beamer-Player bereit — Beamer-Seite öffnen bzw. neu laden.' };
+      try {
+        const resp = await fetch(SPOTIFY_API_BASE + '/me/player/' + action + '?device_id=' + encodeURIComponent(playerDeviceId), {
+          method: 'PUT',
+          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        if (resp.ok) return { ok: true };
+        const data = await resp.json().catch(() => ({}));
+        lastError = 'Spotify ' + resp.status + ': ' + (data.error?.message || resp.statusText);
+        if (resp.status === 401) await refreshSpotifyToken();
+        // 403 = Premium missing or a restriction (e.g. already paused) — retrying won't help.
+        if (resp.status === 403) break;
+      } catch (e) {
+        lastError = 'Spotify nicht erreichbar: ' + e.message;
+      }
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 800 * attempt));
+    }
+    return { ok: false, message: lastError };
+  }
+
+  function startPlayback(uri) {
+    playbackActive = true;
+    return queuePlayerCommand(() => sendPlayerCommand('play', uri ? { uris: [uri] } : null, SPOTIFY_PLAY_ATTEMPTS));
+  }
+
+  function stopPlayback() {
+    if (!playbackActive || !playerDeviceId) return;
+    playbackActive = false;
+    queuePlayerCommand(() => sendPlayerCommand('pause', null, 2)).then((res) => {
+      if (!res.ok) console.log('  [' + roomCode + '] Pause fehlgeschlagen: ' + res.message);
+    });
+  }
+
+  function beginCountdown() {
+    if (!awaitingPlayback) return;
+    startTimer(); // also clears awaitingPlayback + the fallback timeout
+    broadcast();
+  }
+
+  // Starts the current song on the Beamer and the countdown once it's
+  // audible. Without a Spotify song (manual entry) or without a Beamer player
+  // the countdown starts right away — the round must never hang on audio.
+  function startRoundAudio({ resume = false } = {}) {
+    clearTimer();
+    const uri = currentSong && currentSong.spotifyUri;
+    if (!uri) { startTimer(); return; }
+    if (!playerDeviceId) {
+      setPlayerIssue('Kein Beamer-Player bereit — der Song läuft nicht. Beamer-Seite öffnen bzw. neu laden.');
+      startTimer();
+      return;
+    }
+
+    awaitingPlayback = true;
+    playbackWaitTimer = setTimeout(() => {
+      playbackWaitTimer = null;
+      beginCountdown();
+    }, PLAYBACK_CONFIRM_TIMEOUT_MS);
+
+    const expectedSong = currentSong;
+    startPlayback(resume ? null : uri).then((res) => {
+      if (res.ok || currentSong !== expectedSong) return;
+      setPlayerIssue('Song konnte nicht abgespielt werden (' + res.message + ')');
+      beginCountdown();
+    });
+  }
+
+  // Reported by the Beamer's SDK once a track is audibly playing. Matches on
+  // URI so a late report from the previous song can't start this round's clock.
+  function confirmPlayback(socketId, uris) {
+    if (socketId !== playerSocketId || !currentSong || !Array.isArray(uris)) return;
+    if (!uris.includes(currentSong.spotifyUri)) return;
+    const hadIssue = !!playerIssue;
+    playerIssue = null;
+    if (awaitingPlayback) beginCountdown();
+    else if (hadIssue) broadcast();
+  }
+
   function rememberPlayedTrack(playlistId, trackId, cap) {
     const history = recentTracksByPlaylist.get(playlistId) || [];
     history.push(trackId);
@@ -577,7 +729,7 @@ function createSession(roomCode, name, restore) {
     if (!playlistId) throw httpError(400, 'Keine Playlist hinterlegt — bitte in der Moderation eine hinzufügen.');
 
     const metaResp = await fetch(
-      'https://api.spotify.com/v1/playlists/' + playlistId + '?fields=items.total',
+      SPOTIFY_API_BASE + '/playlists/' + playlistId + '?fields=items.total',
       { headers: { 'Authorization': 'Bearer ' + token } }
     );
     const meta = await metaResp.json();
@@ -596,7 +748,7 @@ function createSession(roomCode, name, restore) {
     for (let attempt = 0; attempt < 8; attempt++) {
       const offset = Math.floor(Math.random() * total);
       const resp = await fetch(
-        'https://api.spotify.com/v1/playlists/' + playlistId + '/items?' + querystring.stringify({
+        SPOTIFY_API_BASE + '/playlists/' + playlistId + '/items?' + querystring.stringify({
           limit: 1, offset, market: 'DE',
           fields: 'items(is_local,item(name,uri,id,artists,album,preview_url,duration_ms))',
         }),
@@ -657,11 +809,8 @@ function createSession(roomCode, name, restore) {
     currentSong = song;
     gameState = 'playing';
     timerValue = TIMER_SECONDS;
+    startRoundAudio();
     broadcast();
-    startTimer();
-    if (song.spotifyUri) {
-      io.to('room:' + roomCode).emit('spotify_play', { uri: song.spotifyUri });
-    }
   }
 
   async function doAutoPickSong() {
@@ -691,7 +840,7 @@ function createSession(roomCode, name, restore) {
     paused = false;
     clearTimer();
     gameState = 'revealing';
-    io.to('room:' + roomCode).emit('spotify_pause');
+    stopPlayback();
     broadcast();
 
     if (autoModeratorEnabled) scheduleAuto(doNextRound, AUTO_REVEAL_DURATION_MS);
@@ -706,7 +855,7 @@ function createSession(roomCode, name, restore) {
     currentSong = null;
     answers.clear();
     gameState = 'spinning';
-    io.to('room:' + roomCode).emit('spotify_pause');
+    stopPlayback();
     broadcast();
 
     if (autoModeratorEnabled) {
@@ -743,7 +892,7 @@ function createSession(roomCode, name, restore) {
       team.score = 0;
       team.hasBingo = false;
     }
-    io.to('room:' + roomCode).emit('spotify_pause');
+    stopPlayback();
     broadcast();
 
     if (autoModeratorEnabled) scheduleAuto(doStartSpin, AUTO_BETWEEN_ROUNDS_MS);
@@ -946,6 +1095,10 @@ function createSession(roomCode, name, restore) {
     getValidToken,
     fetchRandomPlaylistTrack,
     setSpotifyTokens,
+    registerPlayer,
+    unregisterPlayer,
+    confirmPlayback,
+    setPlayerIssue,
     close,
   };
 }
@@ -1175,7 +1328,7 @@ app.get('/api/spotify/search', async (req, res) => {
   if (!q) return res.json({ tracks: [] });
 
   try {
-    const resp = await fetch('https://api.spotify.com/v1/search?' + querystring.stringify({
+    const resp = await fetch(SPOTIFY_API_BASE + '/search?' + querystring.stringify({
       q, type: 'track', market: 'DE', limit: 10,
     }), {
       headers: { 'Authorization': 'Bearer ' + token },
@@ -1222,50 +1375,6 @@ app.get('/api/spotify/playlist-random', async (req, res) => {
     res.json({ track });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
-  }
-});
-
-app.put('/api/spotify/play', async (req, res) => {
-  const session = requireSession(req, res);
-  if (!session) return;
-  const token = await session.getValidToken();
-  if (!token) return res.status(401).json({ error: 'Nicht mit Spotify verbunden' });
-
-  const { uri, deviceId } = req.body;
-  try {
-    const resp = await fetch('https://api.spotify.com/v1/me/player/play' + (deviceId ? '?device_id=' + deviceId : ''), {
-      method: 'PUT',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ uris: [uri] }),
-    });
-    if (resp.status === 204 || resp.status === 200) {
-      res.json({ ok: true });
-    } else {
-      const data = await resp.json().catch(() => ({}));
-      res.status(resp.status).json({ error: data.error?.message || 'Playback failed' });
-    }
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.put('/api/spotify/pause', async (req, res) => {
-  const session = requireSession(req, res);
-  if (!session) return;
-  const token = await session.getValidToken();
-  if (!token) return res.status(401).json({ error: 'Nicht verbunden' });
-
-  try {
-    await fetch('https://api.spotify.com/v1/me/player/pause', {
-      method: 'PUT',
-      headers: { 'Authorization': 'Bearer ' + token },
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
   }
 });
 
@@ -1368,8 +1477,29 @@ io.on('connection', (socket) => {
     session.doResetGame();
   });
 
+  // ── Beamer player (display.html's Spotify Web Playback SDK) ──
+  socket.on('spotify_player_ready', (data) => {
+    if (data && typeof data.deviceId === 'string' && data.deviceId) {
+      session.registerPlayer(socket.id, data.deviceId);
+    }
+  });
+
+  socket.on('spotify_player_lost', () => {
+    session.unregisterPlayer(socket.id);
+  });
+
+  socket.on('spotify_player_error', (data) => {
+    const message = data && typeof data.message === 'string' ? data.message.slice(0, 200) : 'Unbekannter Fehler';
+    session.setPlayerIssue('Beamer-Player: ' + message);
+  });
+
+  socket.on('spotify_playback_started', (data) => {
+    session.confirmPlayback(socket.id, data && data.uris);
+  });
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
+    session.unregisterPlayer(socket.id);
     session.unregisterConnection();
     if (socket.teamId) session.handleTeamDisconnect(socket.teamId);
   });

@@ -380,9 +380,11 @@
     const link = document.getElementById('spotify-link');
 
     if (spotifyConnected) {
-      bar.className = 'spotify-bar connected mb';
-      icon.textContent = '🎵';
-      statusTxt.textContent = 'Spotify verbunden';
+      bar.className = 'spotify-bar ' + (state.spotifyPlayerReady ? 'connected' : 'disconnected') + ' mb';
+      icon.textContent = state.spotifyPlayerReady ? '🎵' : '⚠️';
+      statusTxt.textContent = state.spotifyPlayerReady
+        ? 'Spotify verbunden · Beamer-Player bereit'
+        : 'Spotify verbunden · Beamer-Player fehlt (Beamer-Seite öffnen bzw. neu laden)';
       link.textContent = 'Neu verbinden';
     } else {
       bar.className = 'spotify-bar disconnected mb';
@@ -390,6 +392,12 @@
       statusTxt.textContent = 'Spotify nicht verbunden';
       link.textContent = 'Verbinden';
     }
+
+    const issueEl = document.getElementById('spotify-issue');
+    let issue = state.spotifyPlayerIssue || '';
+    if (!issue && state.awaitingPlayback) issue = '⏳ Warte, bis der Song auf dem Beamer läuft — der Timer startet danach.';
+    issueEl.textContent = issue;
+    issueEl.classList.toggle('hidden', !issue);
 
     // Automatischer Moderator
     autoModeratorEnabled = !!state.autoModeratorEnabled;

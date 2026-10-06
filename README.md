@@ -28,11 +28,19 @@ Alle Ansichten außer `/team.html` sind mit dem Site-Passwort geschützt (`SITE_
 
 1. Teams treten über `/team.html` bzw. den QR-Code bei.
 2. Auf `/moderator.html` **Drehen** klicken — das Rad auf dem Beamer wählt eine Kategorie.
-3. Song auswählen (Spotify-Suche, zufälliger Song aus einer Playlist, oder manuell eingeben) und starten — der 60-Sekunden-Timer läuft.
+3. Song auswählen (Spotify-Suche, zufälliger Song aus einer Playlist, oder manuell eingeben) und starten — der 60-Sekunden-Timer läuft los, sobald der Song auf dem Beamer zu hören ist (spätestens nach 6 Sekunden).
 4. Teams tragen ihre Antwort ein und haken nach der Auflösung selbst die passende Zelle auf ihrer eigenen Bingokarte ab (dafür braucht es kein zweites Gerät).
 5. **Lösung zeigen**, dann **Nächste Runde** — und von vorn.
 
 Tastenkürzel auf der Moderationsseite: `D` Drehen, `K` Kategorie neu drehen, `S` Song starten, `Z` Zufälliger Song, `L` Lösung zeigen, `N` Nächste Runde, `R` Reset.
+
+## Spotify-Wiedergabe über den Beamer
+
+Die Musik läuft über den Spotify-Player in `/display.html`. Er startet von selbst, sobald die Runde mit Spotify verbunden ist (auch wenn der Beamer schon vorher offen war), und meldet sich beim Server als Abspielgerät an. Der Server startet und pausiert die Songs dann direkt bei Spotify.
+
+- Voraussetzungen: Spotify Premium, Chrome oder Edge auf dem Beamer-Rechner, und einmal auf den Beamer klicken (Browser spielen ohne Klick keinen Ton ab).
+- Pro Runde spielt nur ein Beamer-Tab. Ein neu geöffneter Beamer-Tab übernimmt; der alte bietet per Klick an, die Wiedergabe zurückzuholen.
+- Die Moderation zeigt in der Spotify-Leiste, ob der Beamer-Player bereit ist, und darunter die letzte Fehlermeldung. Der Beamer zeigt Probleme unten links an.
 
 ## Automatischer Moderator
 
@@ -56,5 +64,6 @@ Wichtige Umgebungsvariablen (alle optional, mit sinnvollen Defaults in `server.j
 - `SITE_PASSWORD` — Passwort für die geschützten Ansichten
 - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI` — Spotify-App-Zugangsdaten
 - `PORT` — Server-Port (Standard 3000)
+- `PLAYBACK_CONFIRM_TIMEOUT_MS` — wie lange der Timer nach dem Songstart höchstens auf die Rückmeldung „Song läuft“ vom Beamer wartet (Standard 6000)
 
 Playlists für den zufälligen Songwähler (manuell wie automatisch) werden direkt in `server.js` unter `SPOTIFY_PLAYLISTS` gepflegt.

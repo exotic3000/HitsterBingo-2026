@@ -329,65 +329,183 @@
   }
 
   // ── Spotify Web Playback SDK ───────────────────────────────────
+  // This tab is only the speaker: it registers its SDK device with the
+  // server, and the server starts/pauses songs on it directly. The player
+  // follows the room's Spotify login on its own — no reload needed when
+  // Spotify gets (re)connected after this page was opened.
 
   var spotifyPlayer = null;
   var spotifyDeviceId = null;
+  var playerStarting = false;
+  var playerReplaced = false; // another Beamer tab took over playback
+  var autoplayBlocked = false;
+  var lastReportedTrack = null;
+  var spotifyReady = false;
+  var spotifyRetryTimer = null;
+  var currentGameState = null;
+  var currentPaused = false;
+  var spotifyStatusEl = document.getElementById('spotify-player-status');
 
-  async function initSpotifyPlayer() {
+  function setPlayerStatus(text) {
+    spotifyStatusEl.textContent = text || '';
+    spotifyStatusEl.classList.toggle('visible', !!text);
+  }
+
+  function reportPlayerError(message) {
+    console.error('Spotify player:', message);
+    setPlayerStatus('⚠ Spotify: ' + message);
+    socket.emit('spotify_player_error', { message: message });
+  }
+
+  function loadSpotifySdk() {
+    if (window.Spotify) return Promise.resolve();
+    if (!loadSpotifySdk.promise) {
+      loadSpotifySdk.promise = new Promise(function(resolve, reject) {
+        window.onSpotifyWebPlaybackSDKReady = resolve;
+        var s = document.createElement('script');
+        s.src = 'https://sdk.scdn.co/spotify-player.js';
+        s.onerror = function() {
+          loadSpotifySdk.promise = null;
+          s.remove();
+          reject(new Error('Spotify-SDK konnte nicht geladen werden'));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return loadSpotifySdk.promise;
+  }
+
+  function fetchSpotifyToken() {
+    return fetch('/api/spotify/token?room=' + encodeURIComponent(roomCode))
+      .then(function(r) { return r.json(); })
+      .then(function(d) { return d.token || ''; });
+  }
+
+  function retrySpotifyPlayerLater() {
+    clearTimeout(spotifyRetryTimer);
+    spotifyRetryTimer = setTimeout(function() {
+      spotifyRetryTimer = null;
+      syncSpotifyPlayer();
+    }, 8000);
+  }
+
+  async function startSpotifyPlayer() {
+    if (spotifyPlayer || playerStarting) return;
+    playerStarting = true;
     try {
-      var resp = await fetch('/api/spotify/token?room=' + encodeURIComponent(roomCode));
-      var data = await resp.json();
-      if (!data.token) return;
-
-      if (!window.Spotify) {
-        await new Promise(function(resolve) {
-          window.onSpotifyWebPlaybackSDKReady = resolve;
-          var s = document.createElement('script');
-          s.src = 'https://sdk.scdn.co/spotify-player.js';
-          document.head.appendChild(s);
-        });
-      }
-
-      spotifyPlayer = new Spotify.Player({
+      await loadSpotifySdk();
+      var player = new Spotify.Player({
         name: 'Hitster Bingo Beamer',
-        getOAuthToken: async function(cb) {
-          var r = await fetch('/api/spotify/token?room=' + encodeURIComponent(roomCode));
-          var d = await r.json();
-          cb(d.token);
-        },
+        getOAuthToken: function(cb) { fetchSpotifyToken().then(cb, function() { cb(''); }); },
         volume: 0.8,
       });
 
-      spotifyPlayer.addListener('ready', function(data) {
+      player.addListener('ready', function(data) {
         spotifyDeviceId = data.device_id;
-        console.log('Spotify Player ready, device:', data.device_id);
+        socket.emit('spotify_player_ready', { deviceId: spotifyDeviceId });
+        if (!autoplayBlocked) setPlayerStatus('');
+      });
+      player.addListener('not_ready', function() {
+        spotifyDeviceId = null;
+        socket.emit('spotify_player_lost');
+        setPlayerStatus('⚠ Spotify-Player offline — verbindet neu …');
+      });
+      // Browsers block audio that isn't triggered by a click on this page.
+      player.addListener('autoplay_failed', function() {
+        autoplayBlocked = true;
+        setPlayerStatus('🔇 Einmal auf den Beamer klicken, um den Spotify-Ton zu aktivieren');
+      });
+      // Tells the server the song is audible, which starts the countdown.
+      player.addListener('player_state_changed', function(state) {
+        if (!state || state.loading) return;
+        if (state.paused) { lastReportedTrack = null; return; }
+        var track = state.track_window && state.track_window.current_track;
+        if (!track || track.uri === lastReportedTrack) return;
+        lastReportedTrack = track.uri;
+        var uris = [track.uri];
+        if (track.linked_from && track.linked_from.uri) uris.push(track.linked_from.uri);
+        socket.emit('spotify_playback_started', { uris: uris });
+      });
+      player.addListener('initialization_error', function(e) {
+        reportPlayerError(e.message + ' (Browser unterstützt die Wiedergabe evtl. nicht — Chrome/Edge verwenden)');
+      });
+      player.addListener('account_error', function(e) {
+        reportPlayerError(e.message + ' (Spotify Premium nötig)');
+      });
+      player.addListener('playback_error', function(e) {
+        reportPlayerError(e.message);
+      });
+      player.addListener('authentication_error', function(e) {
+        reportPlayerError('Anmeldung fehlgeschlagen (' + e.message + ') — neuer Versuch …');
+        stopSpotifyPlayer();
+        retrySpotifyPlayerLater();
       });
 
-      await spotifyPlayer.connect();
+      spotifyPlayer = player;
+      var connected = await player.connect();
+      if (!connected && spotifyPlayer === player) {
+        reportPlayerError('Verbindung zum Spotify-Player fehlgeschlagen — neuer Versuch …');
+        stopSpotifyPlayer();
+        retrySpotifyPlayerLater();
+      }
     } catch (e) {
-      console.log('Spotify SDK not available:', e.message);
+      reportPlayerError(e.message);
+      retrySpotifyPlayerLater();
+    } finally {
+      playerStarting = false;
     }
   }
 
-  socket.on('spotify_play', async function(data) {
-    if (!spotifyDeviceId) return;
-    try {
-      await fetch('/api/spotify/play?room=' + encodeURIComponent(roomCode), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uri: data.uri, deviceId: spotifyDeviceId }),
-      });
-    } catch (e) { console.error('Play failed:', e); }
+  function stopSpotifyPlayer() {
+    if (spotifyPlayer) spotifyPlayer.disconnect();
+    spotifyPlayer = null;
+    if (spotifyDeviceId) socket.emit('spotify_player_lost');
+    spotifyDeviceId = null;
+    lastReportedTrack = null;
+  }
+
+  // Called on every game_state: brings the player up as soon as the room is
+  // connected to Spotify, tears it down when that login goes away, and
+  // re-registers it if the server forgot it (e.g. after a socket reconnect).
+  function syncSpotifyPlayer(state) {
+    if (state && spotifyReady && spotifyDeviceId && !playerReplaced && !state.spotifyPlayerReady) {
+      socket.emit('spotify_player_ready', { deviceId: spotifyDeviceId });
+    }
+    // While a retry is scheduled, let it run instead of hammering Spotify
+    // with a new attempt on every state update.
+    if (spotifyReady && !playerReplaced) {
+      if (!spotifyRetryTimer) startSpotifyPlayer();
+    } else if (!spotifyReady && spotifyPlayer) {
+      stopSpotifyPlayer();
+      setPlayerStatus('');
+    }
+  }
+
+  socket.on('spotify_player_replaced', function() {
+    playerReplaced = true;
+    stopSpotifyPlayer();
+    setPlayerStatus('Spotify spielt auf einem anderen Beamer — hier klicken, um die Wiedergabe hierher zu holen');
   });
 
-  socket.on('spotify_pause', async function() {
-    try {
-      if (spotifyPlayer) spotifyPlayer.pause();
-      await fetch('/api/spotify/pause?room=' + encodeURIComponent(roomCode), { method: 'PUT' });
-    } catch (e) { /* ignore */ }
-  });
-
-  initSpotifyPlayer();
+  // Any click/keypress on the Beamer unlocks audio for the SDK — it needs
+  // that user gesture itself, unlocking the page's own sounds isn't enough.
+  function onUserGesture() {
+    if (playerReplaced) {
+      playerReplaced = false;
+      setPlayerStatus('');
+      syncSpotifyPlayer();
+      return;
+    }
+    if (!spotifyPlayer) return;
+    spotifyPlayer.activateElement();
+    if (autoplayBlocked) {
+      autoplayBlocked = false;
+      setPlayerStatus('');
+      if (currentGameState === 'playing' && !currentPaused) spotifyPlayer.resume();
+    }
+  }
+  document.addEventListener('click', onUserGesture);
+  document.addEventListener('keydown', onUserGesture);
 
   // ── Bingo Celebration ────────────────────────────────────────────
   // Full-screen overlay + fanfare + confetti when a team first hits Bingo.
@@ -443,6 +561,10 @@
 
   socket.on('game_state', function(state) {
     renderRoomBadge(state);
+    currentGameState = state.gameState;
+    currentPaused = !!state.paused;
+    spotifyReady = !!state.spotifyReady;
+    syncSpotifyPlayer(state);
     document.getElementById('pause-overlay').classList.toggle('visible', !!state.paused);
     categories = state.categories || [];
     var teams = Object.values(state.teams);

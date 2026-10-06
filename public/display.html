@@ -350,6 +350,24 @@
     }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
+    /* Only shown when the Beamer's Spotify player needs attention. */
+    .spotify-player-status {
+      position: fixed;
+      left: 1rem;
+      bottom: 1rem;
+      z-index: 1001;
+      max-width: min(480px, calc(100vw - 2rem));
+      padding: .6rem 1rem;
+      border: 1px solid var(--gold);
+      border-radius: 12px;
+      background: rgba(10,14,39,.92);
+      color: var(--gold);
+      font-size: .85rem;
+      cursor: pointer;
+      display: none;
+    }
+    .spotify-player-status.visible { display: block; }
+
     @media (max-width: 768px) {
       .splash-planet-wrap { width: 80px; height: 80px; top: 8%; right: 6%; }
       .splash-planet::after { width: 130px; height: 28px; }
@@ -374,6 +392,7 @@
       <p class="splash-sub2">✨ Teenscamp Edition ✨</p>
     </div>
   </div>
+  <div id="spotify-player-status" class="spotify-player-status" role="status"></div>
   <canvas id="particles-canvas"></canvas>
   <div id="pause-overlay" class="pause-overlay">
     <div class="pause-overlay-icon">⏸</div>
