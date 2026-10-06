@@ -1,8 +1,7 @@
 /* Overview / Scoreboard View */
 
 (function () {
-  const socket = connectSocket();
-  socket.emit('join', { role: 'overview' });
+  const socket = connectSocket('overview');
 
   const timerEl = document.getElementById('timer');
 

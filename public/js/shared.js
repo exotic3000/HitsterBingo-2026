@@ -28,12 +28,29 @@ function getRoomCode() {
 // The room is bound once, at the handshake, via a query param the server
 // reads before any 'join' — every view already knows its own room from its
 // own URL before it opens a socket at all (see server.js's io.on('connection')).
+//
+// WebSocket first: Socket.IO otherwise starts every connection with HTTP
+// long-polling and only upgrades later, so each device sat on slow polling
+// requests through the Cloudflare tunnel — or stayed there for good when the
+// upgrade failed on a flaky venue network. tryAllTransports still falls
+// back to polling where a network blocks WebSockets entirely.
+//
+// `role` is re-announced on every (re)connect: after a dropped connection
+// the server sees a brand-new socket and would otherwise only send it the
+// minimal view of a not-yet-joined tab.
 
-function connectSocket() {
-  const socket = io({ query: { room: getRoomCode() } });
+function connectSocket(role) {
+  const socket = io({
+    query: { room: getRoomCode() },
+    transports: ['websocket', 'polling'],
+    tryAllTransports: true,
+  });
   const connDot = document.getElementById('conn');
 
-  socket.on('connect', () => { if (connDot) connDot.className = 'conn on'; });
+  socket.on('connect', () => {
+    if (connDot) connDot.className = 'conn on';
+    if (role) socket.emit('join', { role });
+  });
   socket.on('disconnect', () => { if (connDot) connDot.className = 'conn off'; });
   socket.on('invalid_room', () => showRoomUnavailableOverlay());
   socket.on('room_closed', () => showRoomUnavailableOverlay());

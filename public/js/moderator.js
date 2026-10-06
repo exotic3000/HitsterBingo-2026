@@ -1,8 +1,7 @@
 /* Moderator Control View — with Spotify search */
 
 (function () {
-  const socket = connectSocket();
-  socket.emit('join', { role: 'moderator' });
+  const socket = connectSocket('moderator');
 
   const roomCode = getRoomCode();
   document.getElementById('spotify-link').href = '/auth/spotify?room=' + encodeURIComponent(roomCode);

@@ -32,8 +32,7 @@
     });
   })();
 
-  const socket = connectSocket();
-  socket.emit('join', { role: 'display' });
+  const socket = connectSocket('display');
   const roomCode = getRoomCode();
 
   // ── Particles ──────────────────────────────────────────────────
