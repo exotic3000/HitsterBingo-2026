@@ -6,10 +6,11 @@ Wirkliches Front- und Backend der Hitster Bingo TC Gameshow 2026.
 
 ```bash
 npm install
+cp .env.example .env   # einmalig, dann Passwort und Spotify-Zugangsdaten eintragen
 node server.js
 ```
 
-Der Server läuft standardmäßig auf Port 3000. Für Spotify-Songwiedergabe müssen `SPOTIFY_CLIENT_ID` und `SPOTIFY_CLIENT_SECRET` gesetzt sein (siehe Konsolenausgabe beim Start); ohne Spotify-Verbindung können Songs nur manuell eingetragen werden und der automatische Moderator (siehe unten) steht nicht zur Verfügung.
+Der Server läuft standardmäßig auf Port 3000. Passwörter und Zugangsdaten stehen nie im Code (das Repository ist öffentlich), sondern in der `.env`-Datei neben `server.js`, die nicht ins Git-Repository kommt — oder in echten Umgebungsvariablen, die Vorrang haben. Ohne `SITE_PASSWORD` erzeugt der Server bei jedem Start ein zufälliges Passwort und zeigt es in der Konsole. Ohne `SPOTIFY_CLIENT_ID` und `SPOTIFY_CLIENT_SECRET` können Songs nur manuell eingetragen werden, und der automatische Moderator (siehe unten) steht nicht zur Verfügung.
 
 ## Ansichten
 
@@ -24,7 +25,7 @@ Der Server läuft standardmäßig auf Port 3000. Für Spotify-Songwiedergabe mü
 
 Jede Ansicht bekommt vom Server nur die Daten, die sie anzeigt, und nur, wenn sich dafür etwas geändert hat. Team-Handys sehen ihre eigene Bingokarte und Antwort, aber keine fremden; der Beamer erfährt nur, *ob* ein Team geantwortet hat.
 
-Alle Ansichten außer `/team.html` sind mit dem Site-Passwort geschützt (`SITE_PASSWORD`, Standard `OutOfOrbit26`).
+Alle Ansichten außer `/team.html` und `/join.html` sind mit dem Site-Passwort geschützt (`SITE_PASSWORD`, siehe `.env`). Das gilt auch für die Live-Verbindung: Nur angemeldete Geräte dürfen als Moderation, Beamer oder Übersicht auftreten und das Spiel steuern; ein Team-Handy kann nur für das eigene Team antworten und abhaken. Ohne festen `SESSION_SECRET` müssen sich Moderation, Beamer und Übersicht nach jedem Server-Neustart neu anmelden — sie leiten dann selbst zur Login-Seite weiter.
 
 ## Normaler Spielablauf (mit Moderation)
 
@@ -61,10 +62,12 @@ Der Automatikmodus lässt sich jederzeit über denselben Schalter wieder ausscha
 
 ## Konfiguration
 
-Wichtige Umgebungsvariablen (alle optional, mit sinnvollen Defaults in `server.js`):
+Einstellungen kommen aus der `.env`-Datei (Vorlage: `.env.example`) oder aus Umgebungsvariablen:
 
-- `SITE_PASSWORD` — Passwort für die geschützten Ansichten
-- `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI` — Spotify-App-Zugangsdaten
+- `SITE_PASSWORD` — Passwort für die geschützten Ansichten (ohne Eintrag: zufällig pro Start, steht in der Konsole)
+- `SESSION_SECRET` — fester Schlüssel für den Login-Cookie (ohne Eintrag werden beim Neustart alle ausgeloggt)
+- `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` — Spotify-App-Zugangsdaten, ohne sie keine Spotify-Funktionen
+- `SPOTIFY_REDIRECT_URI` — muss exakt im Spotify-Dashboard hinterlegt sein
 - `PORT` — Server-Port (Standard 3000)
 - `PLAYLIST_CACHE_TTL_MS` — wie lange eine geladene Playlist zwischengespeichert wird (Standard 1800000 = 30 Minuten)
 - `PLAYBACK_CONFIRM_TIMEOUT_MS` — wie lange der Timer nach dem Songstart höchstens auf die Rückmeldung „Song läuft“ vom Beamer wartet (Standard 6000)

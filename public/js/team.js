@@ -4,6 +4,9 @@
   const socket = connectSocket();
   // Scoped per room so a stale id from a different round never gets resumed.
   const STORAGE_KEY = 'hitsterbingo_team_id_' + (getRoomCode() || 'none');
+  // Proves to the server that this phone created the team — needed to
+  // resume it after a reload or dropped connection.
+  const SECRET_KEY = 'hitsterbingo_team_secret_' + (getRoomCode() || 'none');
 
   let myTeamId = null;
   let selectedEmoji = '🚀';
@@ -86,10 +89,12 @@
   // uniqueness before the team is even created (avoids leaving a
   // half-created team behind on a rejected name/emoji).
   function requestTeamId(existingId, name, emoji, onResult) {
-    socket.emit('join', { role: 'team', teamId: existingId || undefined, name, emoji }, (res) => {
+    const teamSecret = existingId ? sessionStorage.getItem(SECRET_KEY) || undefined : undefined;
+    socket.emit('join', { role: 'team', teamId: existingId || undefined, teamSecret, name, emoji }, (res) => {
       if (res && res.ok && res.teamId) {
         myTeamId = res.teamId;
         sessionStorage.setItem(STORAGE_KEY, res.teamId);
+        if (res.teamSecret) sessionStorage.setItem(SECRET_KEY, res.teamSecret);
         // The game_state broadcasts triggered by our own join already
         // arrived while myTeamId was still null, so they were ignored —
         // re-apply the last one now that we know which team is ours.
@@ -108,6 +113,7 @@
     // This button always creates a brand-new team — never reuse an id
     // cached from a team this device joined earlier.
     sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(SECRET_KEY);
     myTeamId = null;
 
     requestTeamId(undefined, name, selectedEmoji, (res) => {
@@ -250,6 +256,7 @@
 
   socket.on('kicked', () => {
     sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(SECRET_KEY);
     myTeamId = null;
     submitted = false;
     hide('sec-game');

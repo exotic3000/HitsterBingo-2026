@@ -78,7 +78,7 @@ async function setupRoom({ deviceId } = {}) {
   const roomCode = (await createRoom(server.base, cookie)).body.roomCode;
   await fetch(server.base + '/api/test/seed-spotify-token/' + roomCode, { method: 'POST' });
 
-  const mod = connectSocket(server.base, roomCode);
+  const mod = connectSocket(server.base, roomCode, cookie);
   sockets.push(mod);
   const room = { roomCode, mod, state: null, ticks: [] };
   mod.on('game_state', (s) => { room.state = s; });
@@ -90,7 +90,7 @@ async function setupRoom({ deviceId } = {}) {
 }
 
 async function connectDisplay(room, deviceId) {
-  const display = connectSocket(server.base, room.roomCode);
+  const display = connectSocket(server.base, room.roomCode, cookie);
   sockets.push(display);
   await waitForEvent(display, 'connect');
   display.emit('spotify_player_ready', { deviceId });

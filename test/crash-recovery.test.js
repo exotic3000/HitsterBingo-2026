@@ -30,7 +30,7 @@ test('a round survives a restart: teams, score, current song and the running tim
   const seedResp = await fetch(server.base + '/api/test/seed-spotify-token/' + roomCode, { method: 'POST' });
   assert.equal(seedResp.status, 200);
 
-  const mod = connectSocket(server.base, roomCode);
+  const mod = connectSocket(server.base, roomCode, cookie);
   const team = connectSocket(server.base, roomCode);
   await Promise.all([waitForEvent(mod, 'connect'), waitForEvent(team, 'connect')]);
 
@@ -73,7 +73,8 @@ test('a round survives a restart: teams, score, current song and the running tim
   assert.equal(restored.gameState, 'playing');
 
   // Joined as the overview — it's the view that shows every team's score.
-  const team2 = connectSocket(server.base, roomCode);
+  // Fresh login: without a fixed SESSION_SECRET a restart invalidates cookies.
+  const team2 = connectSocket(server.base, roomCode, await login(server.base));
   await waitForEvent(team2, 'game_state');
   const joinedState = waitForEvent(team2, 'game_state');
   team2.emit('join', { role: 'overview' });

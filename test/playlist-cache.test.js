@@ -93,7 +93,7 @@ async function newConnectedRoom() {
 }
 
 async function randomSong(roomCode, playlist) {
-  const resp = await fetch(server.base + '/api/spotify/playlist-random?room=' + roomCode + '&playlist=' + playlist);
+  const resp = await fetch(server.base + '/api/spotify/playlist-random?room=' + roomCode + '&playlist=' + playlist, { headers: { Cookie: cookie } });
   return { status: resp.status, body: await resp.json() };
 }
 

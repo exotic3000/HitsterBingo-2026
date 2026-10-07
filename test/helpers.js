@@ -9,7 +9,7 @@ const fs = require('fs');
 const { io } = require('socket.io-client');
 
 const ROOT = path.join(__dirname, '..');
-const SITE_PASSWORD = 'OutOfOrbit26'; // matches server.js's default
+const SITE_PASSWORD = 'test-password'; // passed to every test server below
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,6 +31,8 @@ async function startServer({ port, snapshotFile, env = {} }) {
       PORT: String(port),
       SNAPSHOT_FILE: snapshotFile,
       SITE_PASSWORD,
+      // Never pick up a developer's real .env (passwords, Spotify app).
+      ENV_FILE: path.join(ROOT, '.env.does-not-exist'),
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -102,13 +104,20 @@ async function listRooms(base) {
 // own socket.disconnect() call, an un-cleaned-up socket must die quietly
 // once its server goes away, not retry forever and keep the test process's
 // event loop alive (which otherwise hangs the whole file, not just that test).
-function connectSocket(base, roomCode) {
-  return io(base, { transports: ['websocket'], reconnection: false, query: { room: roomCode || '' } });
+// Pass the login `cookie` for views that need the site password (moderator,
+// Beamer, overview) — like a browser that's logged in.
+function connectSocket(base, roomCode, cookie) {
+  return io(base, {
+    transports: ['websocket'],
+    reconnection: false,
+    query: { room: roomCode || '' },
+    ...(cookie ? { extraHeaders: { Cookie: cookie } } : {}),
+  });
 }
 
-async function joinTeam(socket, { teamId, name, emoji } = {}) {
+async function joinTeam(socket, { teamId, teamSecret, name, emoji } = {}) {
   return new Promise((resolve) => {
-    socket.emit('join', { role: 'team', teamId, name, emoji: emoji || '🚀' }, resolve);
+    socket.emit('join', { role: 'team', teamId, teamSecret, name, emoji: emoji || '🚀' }, resolve);
   });
 }
 
@@ -121,6 +130,7 @@ function removeIfExists(filePath) {
 }
 
 module.exports = {
+  SITE_PASSWORD,
   sleep,
   waitForEvent,
   startServer,

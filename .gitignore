@@ -4,3 +4,4 @@ dist
 .spotify-token.json
 .rooms-snapshot.json
 .playlists.json
+.env

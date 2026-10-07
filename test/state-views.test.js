@@ -13,13 +13,13 @@ const {
 const PORT = 3208;
 const snapshotFile = uniqueSnapshotPath('state-views');
 
-let server, roomCode;
+let server, roomCode, cookie;
 const views = {};
 const sockets = [];
 
 // Connects a socket, records every game_state it receives, optionally joins a role.
 async function openView(name, role) {
-  const socket = connectSocket(server.base, roomCode);
+  const socket = connectSocket(server.base, roomCode, role ? cookie : undefined);
   sockets.push(socket);
   const view = { socket, states: [] };
   socket.on('game_state', (s) => view.states.push(s));
@@ -37,7 +37,7 @@ function last(name) {
 before(async () => {
   removeIfExists(snapshotFile);
   server = await startServer({ port: PORT, snapshotFile });
-  const cookie = await login(server.base);
+  cookie = await login(server.base);
   roomCode = (await createRoom(server.base, cookie)).body.roomCode;
 
   await openView('mod', 'moderator');

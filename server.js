@@ -8,6 +8,26 @@ const { v4: uuidv4 } = require('uuid');
 const querystring = require('querystring');
 const QRCode = require('qrcode');
 
+// ── Secrets from .env ────────────────────────────────────────────
+// Passwords and API secrets never live in this file (the repository is
+// public). They come from real environment variables, or from a `.env`
+// file next to this script that is git-ignored — see `.env.example`.
+// Real environment variables win over the file.
+function loadEnvFile(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    return; // no .env — fine, e.g. when systemd sets the variables itself
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (!match || process.env[match[1]] !== undefined) continue;
+    process.env[match[1]] = match[2].replace(/^(['"])(.*)\1$/, '$2');
+  }
+}
+loadEnvFile(process.env.ENV_FILE || path.join(__dirname, '.env'));
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -17,7 +37,10 @@ const io = new Server(server);
 // password) and the assets/sockets/APIs every page depends on. Session
 // token is derived from a secret that's regenerated on each server start,
 // so a restart simply logs everyone out again — no persistence needed.
-const SITE_PASSWORD = process.env.SITE_PASSWORD || 'OutOfOrbit26';
+// Without a configured password the server makes up a random one per start
+// and prints it, rather than falling back to a value anyone could read on GitHub.
+const SITE_PASSWORD_GENERATED = !process.env.SITE_PASSWORD;
+const SITE_PASSWORD = process.env.SITE_PASSWORD || crypto.randomBytes(6).toString('base64url');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const AUTH_COOKIE = 'hb_auth';
 const AUTH_TOKEN = crypto.createHmac('sha256', SESSION_SECRET).update('authenticated').digest('hex');
@@ -51,6 +74,13 @@ function isAuthenticated(req) {
 function requireAuth(req, res, next) {
   if (isAuthenticated(req)) return next();
   res.status(401).json({ error: 'Nicht angemeldet' });
+}
+
+// Same for routes opened as a page in the browser: back to the login,
+// returning to the original URL afterwards.
+function requireAuthPage(req, res, next) {
+  if (isAuthenticated(req)) return next();
+  res.redirect('/login.html?redirect=' + encodeURIComponent(req.originalUrl));
 }
 
 app.use((req, res, next) => {
@@ -111,9 +141,18 @@ app.use(express.static(path.join(__dirname, 'public'), {
 app.use(express.json());
 console.log('[3] Middleware OK, weiter zu Routes...');
 
+// Constant-time comparison, so response timing reveals nothing about how
+// much of a guess was right.
+function passwordMatches(candidate) {
+  if (typeof candidate !== 'string') return false;
+  const a = crypto.createHash('sha256').update(candidate).digest();
+  const b = crypto.createHash('sha256').update(SITE_PASSWORD).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
 app.post('/login', (req, res) => {
   const { password } = req.body || {};
-  if (password !== SITE_PASSWORD) return res.status(401).json({ ok: false });
+  if (!passwordMatches(password)) return res.status(401).json({ ok: false });
 
   // No Max-Age: a session cookie, cleared when the browser fully closes —
   // reopening the browser asks for the password again, but a reload or new
@@ -128,8 +167,9 @@ app.post('/login', (req, res) => {
 
 // ── Spotify Config ──────────────────────────────────────────────
 
-const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || 'f019a8aaafee49a99be7d0d50cfb3db4';
-const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'b31d81165bba4bc1ab5e947a9889154b';
+const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
+const SPOTIFY_CONFIGURED = !!(SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET);
 const PORT = process.env.PORT || 3000;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:' + PORT + '/auth/spotify/callback';
 // Overridable so tests can point the server at a local fake Spotify API.
@@ -433,6 +473,11 @@ function createSession(roomCode, name, restore) {
   const teams = new Map(restore ? restore.teams : undefined);
   const answers = new Map(restore ? restore.answers : undefined);
   const pendingTeamRemoval = new Map(); // teamId -> Timeout, cancelled on reconnect
+  // teamId -> secret only that team's phone knows. Team ids are visible to
+  // every device (they key the team list), so resuming a team needs this
+  // too — otherwise anyone could take over another team's seat and card.
+  // Kept apart from the team objects so it never goes out in game state.
+  const teamSecrets = new Map(restore && restore.teamSecrets ? restore.teamSecrets : undefined);
   let gameState = (restore && restore.gameState) || 'lobby';
   let currentRound = (restore && restore.currentRound) || 0;
   let spinToken = (restore && restore.spinToken) || 0;
@@ -1017,7 +1062,14 @@ function createSession(roomCode, name, restore) {
     let teamId = data.teamId;
     const resuming = teamId && teams.has(teamId);
 
+    // Teams restored from an older snapshot have no secret yet — those may
+    // still resume by id alone, once, and get one now.
+    if (resuming && teamSecrets.has(teamId) && data.teamSecret !== teamSecrets.get(teamId)) {
+      return { ok: false, message: 'Dieses Team ist auf einem anderen Gerät angemeldet.' };
+    }
+
     if (resuming) {
+      if (!teamSecrets.has(teamId)) teamSecrets.set(teamId, crypto.randomBytes(16).toString('hex'));
       const pending = pendingTeamRemoval.get(teamId);
       if (pending) {
         clearTimeout(pending);
@@ -1041,6 +1093,7 @@ function createSession(roomCode, name, restore) {
     if (emojiTaken) return { ok: false, field: 'emoji', message: 'Dieses Emoji ist bereits vergeben.' };
 
     teamId = uuidv4();
+    teamSecrets.set(teamId, crypto.randomBytes(16).toString('hex'));
     teams.set(teamId, {
       id: teamId,
       name,
@@ -1061,6 +1114,7 @@ function createSession(roomCode, name, restore) {
       pendingTeamRemoval.delete(teamId);
       if (!teams.has(teamId)) return;
       teams.delete(teamId);
+      teamSecrets.delete(teamId);
       answers.delete(teamId);
       broadcast();
     }, TEAM_DISCONNECT_GRACE_MS);
@@ -1091,6 +1145,7 @@ function createSession(roomCode, name, restore) {
       pendingTeamRemoval.delete(teamId);
     }
     teams.delete(teamId);
+    teamSecrets.delete(teamId);
     answers.delete(teamId);
     io.to('team_' + teamId).emit('kicked');
     broadcast();
@@ -1149,6 +1204,7 @@ function createSession(roomCode, name, restore) {
       roomName,
       createdAt,
       teams: [...teams.entries()],
+      teamSecrets: [...teamSecrets.entries()],
       answers: [...answers.entries()],
       gameState,
       currentRound,
@@ -1191,6 +1247,7 @@ function createSession(roomCode, name, restore) {
     setViewerRole,
     removeViewer,
     resolveTeamJoin,
+    teamSecretFor: (teamId) => teamSecrets.get(teamId),
     handleTeamDisconnect,
     submitAnswer,
     markCorrect,
@@ -1332,7 +1389,7 @@ app.get('/api/join-qr', async (req, res) => {
 
 // ── Spotify OAuth ───────────────────────────────────────────────
 
-app.get('/auth/spotify/debug', (req, res) => {
+app.get('/auth/spotify/debug', requireAuthPage, (req, res) => {
   const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
   const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
     response_type: 'code',
@@ -1350,13 +1407,13 @@ app.get('/auth/spotify/debug', (req, res) => {
     + '</body></html>');
 });
 
-app.get('/auth/spotify', (req, res) => {
+app.get('/auth/spotify', requireAuthPage, (req, res) => {
   const roomCode = req.query.room;
   if (!roomCode || !sessions.has(roomCode)) {
     return res.status(404).send('Unbekannte Runde. Bitte den Verbinden-Link erneut über die Moderationsseite öffnen.');
   }
-  if (!SPOTIFY_CLIENT_ID) {
-    return res.status(500).send('SPOTIFY_CLIENT_ID nicht gesetzt. Starte den Server mit: SPOTIFY_CLIENT_ID=xxx SPOTIFY_CLIENT_SECRET=yyy node server.js');
+  if (!SPOTIFY_CONFIGURED) {
+    return res.status(500).send('Spotify ist nicht eingerichtet: SPOTIFY_CLIENT_ID und SPOTIFY_CLIENT_SECRET in der .env-Datei des Servers eintragen (siehe .env.example) und den Server neu starten.');
   }
   const scopes = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
   const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
@@ -1371,6 +1428,9 @@ app.get('/auth/spotify', (req, res) => {
 });
 
 app.get('/auth/spotify/callback', async (req, res) => {
+  // Only the signed-in moderator who started the login may attach a Spotify
+  // account to a round — Spotify redirects back in that same browser.
+  if (!isAuthenticated(req)) return res.status(401).send('Nicht angemeldet. Bitte zuerst auf der Moderationsseite einloggen und Spotify von dort aus verbinden.');
   const { code, error, state } = req.query;
   if (error) return res.send('Spotify Auth Fehler: ' + error);
   if (!code) return res.send('Kein Code erhalten');
@@ -1425,14 +1485,14 @@ if (process.env.ENABLE_TEST_HOOKS === '1') {
 }
 
 // Spotify API proxy: the client gets the token to init the Web Playback SDK
-app.get('/api/spotify/token', async (req, res) => {
+app.get('/api/spotify/token', requireAuth, async (req, res) => {
   const session = requireSession(req, res);
   if (!session) return;
   const token = await session.getValidToken();
   res.json({ token: token || null });
 });
 
-app.get('/api/spotify/search', async (req, res) => {
+app.get('/api/spotify/search', requireAuth, async (req, res) => {
   const session = requireSession(req, res);
   if (!session) return;
   const token = await session.getValidToken();
@@ -1481,7 +1541,7 @@ app.delete('/api/spotify/playlists/:id', requireAuth, (req, res) => {
   res.json({ playlists: SPOTIFY_PLAYLISTS.map((p) => ({ id: p.id, name: p.name })) });
 });
 
-app.get('/api/spotify/playlist-random', async (req, res) => {
+app.get('/api/spotify/playlist-random', requireAuth, async (req, res) => {
   const session = requireSession(req, res);
   if (!session) return;
   try {
@@ -1493,6 +1553,27 @@ app.get('/api/spotify/playlist-random', async (req, res) => {
 });
 
 // ── Socket.IO ───────────────────────────────────────────────────
+
+const STAFF_ROLES = new Set(['moderator', 'display', 'overview']);
+
+function isCellIndex(n) {
+  return Number.isInteger(n) && n >= 0 && n < BINGO_SIZE;
+}
+
+// Only plain strings of sane length reach the game state — a malformed
+// payload must never be able to crash the server or inject odd values.
+function sanitizeSong(song) {
+  if (!song || typeof song !== 'object') return null;
+  const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const clean = {
+    title: str(song.title, 200),
+    artist: str(song.artist, 200),
+    year: str(song.year, 10),
+    spotifyUri: typeof song.spotifyUri === 'string' && /^spotify:track:[A-Za-z0-9]+$/.test(song.spotifyUri) ? song.spotifyUri : null,
+    cover: typeof song.cover === 'string' && /^https:\/\//.test(song.cover) ? song.cover.slice(0, 500) : null,
+  };
+  return clean.title && clean.artist ? clean : null;
+}
 // Which room a socket belongs to is fixed at connection time via the
 // `room` handshake query param (see shared.js's connectSocket()) — every
 // view already knows its own room from its own URL before it ever opens a
@@ -1511,101 +1592,133 @@ io.on('connection', (socket) => {
     return;
   }
 
+  // Signed in with the site password (same cookie as the protected pages).
+  // Only such sockets may run the show; everyone who merely knows the room
+  // code — every team does — could otherwise pose as the moderator, read
+  // all answers, or reset the round from the browser console.
+  socket.isStaff = isAuthenticated(socket.request);
+
   socket.roomCode = roomCode;
   session.registerConnection();
   socket.join('room:' + roomCode);
   session.addViewer(socket);
+
+  // Wraps a handler that only signed-in views may trigger; anything else is
+  // dropped, with an explanation if the client asked for an acknowledgement.
+  function staffOnly(handler) {
+    return (...args) => {
+      if (socket.isStaff) return handler(...args);
+      const ack = args.find((a) => typeof a === 'function');
+      if (ack) ack({ ok: false, auth: true, message: 'Nicht angemeldet — bitte neu einloggen.' });
+    };
+  }
 
   socket.on('join', (data, ack) => {
     const { role } = data || {};
     const reply = (res) => { if (typeof ack === 'function') ack(res); };
     let teamId;
 
-    if (role === 'team') {
+    if (STAFF_ROLES.has(role)) {
+      if (!socket.isStaff) { reply({ ok: false, auth: true, message: 'Nicht angemeldet — bitte neu einloggen.' }); return; }
+    } else if (role === 'team') {
       const result = session.resolveTeamJoin(data);
       if (!result.ok) { reply(result); return; }
       teamId = result.teamId;
       socket.join('team_' + teamId);
       socket.teamId = teamId;
+    } else {
+      reply({ ok: false, message: 'Unbekannte Rolle' });
+      return;
     }
 
     socket.join(role);
     session.setViewerRole(socket.id, role, teamId);
     session.broadcast();
-    reply({ ok: true, teamId: role === 'team' ? teamId : undefined });
+    reply(role === 'team'
+      ? { ok: true, teamId, teamSecret: session.teamSecretFor(teamId) }
+      : { ok: true });
   });
 
-  socket.on('start_spin', () => {
+  socket.on('start_spin', staffOnly(() => {
     session.clearAutoModeratorTimer();
     session.doStartSpin();
-  });
+  }));
 
-  socket.on('set_song', (song) => {
+  socket.on('set_song', staffOnly((song) => {
+    const clean = sanitizeSong(song);
+    if (!clean) return;
     session.clearAutoModeratorTimer();
-    session.doSetSong(song);
-  });
+    session.doSetSong(clean);
+  }));
 
+  // A team always answers for itself — the teamId in the payload is ignored.
   socket.on('submit_answer', (data) => {
-    session.submitAnswer(data.teamId, data.answer);
+    if (!socket.teamId || !data || typeof data.answer !== 'string') return;
+    const answer = data.answer.trim().slice(0, 200);
+    if (answer) session.submitAnswer(socket.teamId, answer);
   });
 
-  socket.on('pause_game', () => {
+  socket.on('pause_game', staffOnly(() => {
     session.pauseGame();
-  });
+  }));
 
-  socket.on('resume_game', () => {
+  socket.on('resume_game', staffOnly(() => {
     session.resumeGame();
-  });
+  }));
 
-  socket.on('reveal_solution', () => {
+  socket.on('reveal_solution', staffOnly(() => {
     session.clearAutoModeratorTimer();
     session.doRevealSolution();
-  });
+  }));
 
-  socket.on('set_auto_moderator', async (data, ack) => {
+  socket.on('set_auto_moderator', staffOnly(async (data, ack) => {
     const reply = (res) => { if (typeof ack === 'function') ack(res); };
     const result = await session.setAutoModerator(!!(data && data.enabled), data && data.playlist);
     reply(result);
-  });
+  }));
 
+  // Teams tick their own card; the moderator may correct any team's.
   socket.on('mark_correct', (data) => {
-    session.markCorrect(data.teamId, data.row, data.col);
+    if (!data || !isCellIndex(data.row) || !isCellIndex(data.col)) return;
+    const teamId = socket.isStaff ? data.teamId : socket.teamId;
+    if (!teamId || (!socket.isStaff && data.teamId !== socket.teamId)) return;
+    session.markCorrect(teamId, data.row, data.col);
   });
 
-  socket.on('kick_team', (data) => {
-    session.kickTeam(data.teamId);
-  });
+  socket.on('kick_team', staffOnly((data) => {
+    if (data && typeof data.teamId === 'string') session.kickTeam(data.teamId);
+  }));
 
-  socket.on('redraw_category', () => {
+  socket.on('redraw_category', staffOnly(() => {
     session.clearAutoModeratorTimer();
     session.doRedrawCategory();
-  });
+  }));
 
-  socket.on('next_round', () => {
+  socket.on('next_round', staffOnly(() => {
     session.clearAutoModeratorTimer();
     session.doNextRound();
-  });
+  }));
 
-  socket.on('reset_game', () => {
+  socket.on('reset_game', staffOnly(() => {
     session.clearAutoModeratorTimer();
     session.doResetGame();
-  });
+  }));
 
   // ── Beamer player (display.html's Spotify Web Playback SDK) ──
-  socket.on('spotify_player_ready', (data) => {
+  socket.on('spotify_player_ready', staffOnly((data) => {
     if (data && typeof data.deviceId === 'string' && data.deviceId) {
       session.registerPlayer(socket.id, data.deviceId);
     }
-  });
+  }));
 
   socket.on('spotify_player_lost', () => {
     session.unregisterPlayer(socket.id);
   });
 
-  socket.on('spotify_player_error', (data) => {
+  socket.on('spotify_player_error', staffOnly((data) => {
     const message = data && typeof data.message === 'string' ? data.message.slice(0, 200) : 'Unbekannter Fehler';
     session.setPlayerIssue('Beamer-Player: ' + message);
-  });
+  }));
 
   socket.on('spotify_playback_started', (data) => {
     session.confirmPlayback(socket.id, data && data.uris);
@@ -1639,14 +1752,19 @@ server.listen(PORT, () => {
   console.log('  Server:     http://localhost:' + PORT);
   console.log('  Rundenverwaltung: http://localhost:' + PORT + '/');
   console.log('');
-  if (SPOTIFY_CLIENT_ID) {
+  if (SITE_PASSWORD_GENERATED) {
+    console.log('  ⚠ Kein SITE_PASSWORD gesetzt — Passwort für diesen Start: ' + SITE_PASSWORD);
+    console.log('    Dauerhaft festlegen in der .env-Datei (siehe .env.example).');
+    console.log('');
+  }
+  if (SPOTIFY_CONFIGURED) {
     console.log('  Spotify Auth (pro Runde):  http://127.0.0.1:' + PORT + '/auth/spotify?room=<code>');
     console.log('');
     console.log('  ⚠ Trage diese EXAKTE Redirect URI im Spotify Dashboard ein:');
     console.log('  → ' + SPOTIFY_REDIRECT_URI);
   } else {
     console.log('  Spotify:     Nicht konfiguriert');
-    console.log('               Starte mit: SPOTIFY_CLIENT_ID=xxx SPOTIFY_CLIENT_SECRET=yyy node server.js');
+    console.log('               SPOTIFY_CLIENT_ID und SPOTIFY_CLIENT_SECRET in der .env-Datei eintragen (siehe .env.example)');
   }
   console.log('');
 });

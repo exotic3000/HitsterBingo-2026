@@ -21,7 +21,7 @@ before(async () => {
   cookie = await login(server.base);
   roomCode = (await createRoom(server.base, cookie)).body.roomCode;
 
-  mod = connectSocket(server.base, roomCode);
+  mod = connectSocket(server.base, roomCode, cookie);
   team = connectSocket(server.base, roomCode);
   await Promise.all([waitForEvent(mod, 'connect'), waitForEvent(team, 'connect')]);
   team.on('game_state', (s) => { lastState = s; });

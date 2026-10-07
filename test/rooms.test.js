@@ -28,8 +28,8 @@ test('teams, spin state and kicks stay isolated between two concurrent rooms', a
   const roomA = (await createRoom(server.base, cookie)).body.roomCode;
   const roomB = (await createRoom(server.base, cookie)).body.roomCode;
 
-  const modA = connectSocket(server.base, roomA);
-  const modB = connectSocket(server.base, roomB);
+  const modA = connectSocket(server.base, roomA, cookie);
+  const modB = connectSocket(server.base, roomB, cookie);
 
   let stateA = null, stateB = null;
   modA.on('game_state', (s) => { stateA = s; });

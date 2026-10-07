@@ -49,7 +49,11 @@ function connectSocket(role) {
 
   socket.on('connect', () => {
     if (connDot) connDot.className = 'conn on';
-    if (role) socket.emit('join', { role });
+    if (role) socket.emit('join', { role }, (res) => {
+      // The login cookie is no longer valid (e.g. the server restarted
+      // without a fixed SESSION_SECRET) — log in again and come back here.
+      if (res && res.auth) location.href = '/login.html?redirect=' + encodeURIComponent(location.pathname + location.search);
+    });
   });
   socket.on('disconnect', () => { if (connDot) connDot.className = 'conn off'; });
   socket.on('invalid_room', () => showRoomUnavailableOverlay());
