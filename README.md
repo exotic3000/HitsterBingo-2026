@@ -12,6 +12,15 @@ node server.js
 
 Der Server läuft standardmäßig auf Port 3000. Passwörter und Zugangsdaten stehen nie im Code (das Repository ist öffentlich), sondern in der `.env`-Datei neben `server.js`, die nicht ins Git-Repository kommt — oder in echten Umgebungsvariablen, die Vorrang haben. Ohne `SITE_PASSWORD` erzeugt der Server bei jedem Start ein zufälliges Passwort und zeigt es in der Konsole. Ohne `SPOTIFY_CLIENT_ID` und `SPOTIFY_CLIENT_SECRET` können Songs nur manuell eingetragen werden, und der automatische Moderator (siehe unten) steht nicht zur Verfügung.
 
+## Betrieb auf dem Server
+
+Produktiv läuft der Server auf einem Fedora-Rechner als **Benutzer-Dienst** (`systemd --user`) und ist über einen Cloudflare-Tunnel (`localhost:3001`) unter `https://bingo.hitsterquizshow.de` erreichbar. Ein System-Dienst funktioniert dort nicht, weil SELinux System-Diensten den Zugriff auf Ordner unter `/home` verbietet. Einrichtung und Befehle stehen in `deploy/hitster-bingo.service`; das Wichtigste:
+
+```bash
+git pull && systemctl --user restart hitster-bingo   # neuen Stand live nehmen
+journalctl --user -u hitster-bingo -n 50 --no-pager  # Log ansehen
+```
+
 ## Ansichten
 
 | Ansicht | URL | Zweck |

@@ -1,17 +1,31 @@
+# Benutzer-Dienst (systemd --user), nicht System-Dienst: Auf Fedora verbietet
+# SELinux System-Diensten den Zugriff auf Ordner unter /home, ein Benutzer-
+# Dienst läuft dagegen unter dem eigenen Konto und darf dort lesen.
+#
+# Einrichten (als der Benutzer, dem der Projektordner gehört):
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/hitster-bingo.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hitster-bingo
+#   sudo loginctl enable-linger "$USER"     # startet beim Booten, auch ohne Anmeldung
+#
+# Nach einem git pull:  systemctl --user restart hitster-bingo
+# Log:                  journalctl --user -u hitster-bingo -n 50 --no-pager
+#
+# Passwörter und Spotify-Zugangsdaten stehen in der .env neben server.js.
+
 [Unit]
 Description=Hitster Bingo Gameshow Server
-After=network-online.target
-Wants=network-online.target
 
 [Service]
 Type=simple
-User=Juri
-WorkingDirectory=/home/Juri/HitsterBingo-2026
-ExecStart=/usr/bin/node server.js
+WorkingDirectory=%h
+# Pfad zum Projektordner anpassen; %h ist das Home-Verzeichnis.
+ExecStart=/usr/bin/node "%h/Github Repositories/HitsterBingo-2026/server.js"
 Restart=on-failure
 RestartSec=5
 Environment=PORT=3001
 Environment=SPOTIFY_REDIRECT_URI=https://bingo.hitsterquizshow.de/auth/spotify/callback
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
