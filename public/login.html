@@ -40,6 +40,13 @@
       if (resp.ok) {
         location.href = redirect;
       } else {
+        // 429 = zu viele Fehlversuche von diesem Gerät/Netz
+        if (resp.status === 429) {
+          const minutes = Math.ceil(Number(resp.headers.get('Retry-After') || 900) / 60);
+          error.textContent = 'Zu viele Fehlversuche. Bitte in ' + minutes + ' Min. erneut versuchen.';
+        } else {
+          error.textContent = 'Falsches Passwort.';
+        }
         error.classList.remove('hidden');
         input.value = '';
         input.focus();

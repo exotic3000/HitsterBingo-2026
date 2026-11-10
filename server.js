@@ -8,6 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 const querystring = require('querystring');
 const QRCode = require('qrcode');
 const { validateTeamName, validateTeamEmoji } = require('./lib/teamInput');
+const { createLoginThrottle } = require('./lib/loginThrottle');
 
 // ── Secrets from .env ────────────────────────────────────────────
 // Passwords and API secrets never live in this file (the repository is
@@ -151,9 +152,22 @@ function passwordMatches(candidate) {
   return crypto.timingSafeEqual(a, b);
 }
 
+const loginThrottle = createLoginThrottle();
+
 app.post('/login', (req, res) => {
+  const client = loginThrottle.clientKey(req);
+  const waitSeconds = loginThrottle.blockedForSeconds(client);
+  if (waitSeconds > 0) {
+    res.setHeader('Retry-After', String(waitSeconds));
+    return res.status(429).json({ ok: false, retryAfter: waitSeconds });
+  }
+
   const { password } = req.body || {};
-  if (!passwordMatches(password)) return res.status(401).json({ ok: false });
+  if (!passwordMatches(password)) {
+    loginThrottle.recordFailure(client);
+    return res.status(401).json({ ok: false });
+  }
+  loginThrottle.reset(client);
 
   // No Max-Age: a session cookie, cleared when the browser fully closes —
   // reopening the browser asks for the password again, but a reload or new
