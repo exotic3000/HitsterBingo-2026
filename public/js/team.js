@@ -241,9 +241,9 @@
         songEl.innerHTML =
           '<div class="text-center" style="padding:1.5rem">' +
             '<p style="font-size:.75rem;color:var(--text-dim);font-family:var(--font-display)">Lösung</p>' +
-            '<p class="song-title">' + state.currentSong.title + '</p>' +
-            '<p class="song-artist">' + state.currentSong.artist + '</p>' +
-            (state.currentSong.year ? '<p class="song-meta">' + state.currentSong.year + '</p>' : '') +
+            '<p class="song-title">' + escapeHtml(state.currentSong.title) + '</p>' +
+            '<p class="song-artist">' + escapeHtml(state.currentSong.artist) + '</p>' +
+            (state.currentSong.year ? '<p class="song-meta">' + escapeHtml(state.currentSong.year) + '</p>' : '') +
           '</div>';
       }
       renderBingoCard(document.getElementById('bingo-reveal'), team.bingoCard, cardOptions);

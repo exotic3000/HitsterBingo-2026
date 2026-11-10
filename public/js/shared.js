@@ -1,5 +1,17 @@
 /* Shared helpers used by all pages */
 
+// Escapes text for safe insertion into innerHTML strings (also inside
+// attribute values). Every dynamic value — team names, answers, song data —
+// must go through this before it becomes markup.
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const TEAM_EMOJIS = ['🚀','🌟','🪐','👽','🛸','☄️','🌙','⭐','🔭','🌌','💫','🛰️'];
 
 const CAT_MAP = {

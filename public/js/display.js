@@ -629,8 +629,8 @@
         teams.length + ' Team' + (teams.length !== 1 ? 's' : '') + ' verbunden';
       document.getElementById('lobby-teams').innerHTML = teams.map(function(t) {
         return '<div class="card" style="padding:.75rem 1.25rem;min-width:80px;text-align:center">' +
-          '<span style="font-size:1.5rem">' + t.emoji + '</span>' +
-          '<p style="font-size:.8rem;margin-top:.25rem">' + t.name + '</p></div>';
+          '<span style="font-size:1.5rem">' + escapeHtml(t.emoji) + '</span>' +
+          '<p style="font-size:.8rem;margin-top:.25rem">' + escapeHtml(t.name) + '</p></div>';
       }).join('');
 
       // Draw and idle-float
@@ -706,7 +706,7 @@
       return '<div class="card flex items-center gap-sm" style="padding:.5rem 1rem;border-color:' +
         (a ? 'var(--green)' : 'var(--border)') + '">' +
         '<span class="dot ' + (a ? 'on' : 'off') + '"></span>' +
-        '<span>' + t.emoji + ' ' + t.name + '</span></div>';
+        '<span>' + escapeHtml(t.emoji) + ' ' + escapeHtml(t.name) + '</span></div>';
     }).join('');
   }
 
@@ -718,12 +718,12 @@
     }
     var html = '<div class="text-center" style="padding:1.5rem">';
     if (song.cover) {
-      html += '<img src="' + song.cover + '" style="width:120px;height:120px;border-radius:12px;margin:0 auto .75rem;display:block;box-shadow:0 0 30px rgba(0,0,0,.5)">';
+      html += '<img src="' + escapeHtml(song.cover) + '" style="width:120px;height:120px;border-radius:12px;margin:0 auto .75rem;display:block;box-shadow:0 0 30px rgba(0,0,0,.5)">';
     }
     html += '<p style="font-size:.8rem;color:var(--text-dim);font-family:var(--font-display);margin-bottom:.5rem">Lösung</p>';
-    html += '<p class="song-title">' + song.title + '</p>';
-    html += '<p class="song-artist">' + song.artist + '</p>';
-    if (song.year) html += '<p class="song-meta">' + song.year + '</p>';
+    html += '<p class="song-title">' + escapeHtml(song.title) + '</p>';
+    html += '<p class="song-artist">' + escapeHtml(song.artist) + '</p>';
+    if (song.year) html += '<p class="song-meta">' + escapeHtml(song.year) + '</p>';
     html += '</div>';
     el.innerHTML = html;
   }

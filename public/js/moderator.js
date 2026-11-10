@@ -35,12 +35,12 @@
       const resp = await fetch('/api/spotify/search?room=' + encodeURIComponent(roomCode) + '&q=' + encodeURIComponent(q));
       const data = await resp.json();
       if (data.error) {
-        resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">' + data.error + '</p>';
+        resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">' + escapeHtml(data.error) + '</p>';
         return;
       }
       renderSearchResults(data.tracks || []);
     } catch (e) {
-      resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">Fehler: ' + e.message + '</p>';
+      resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">Fehler: ' + escapeHtml(e.message) + '</p>';
     }
   }
 
@@ -62,12 +62,12 @@
     }
     resultsEl.innerHTML = tracks.map((t, i) =>
       '<div class="search-result" data-idx="' + i + '">' +
-        (t.cover ? '<img src="' + t.cover + '" alt="">' : '<div style="width:48px;height:48px;background:var(--surface);border-radius:6px"></div>') +
+        (t.cover ? '<img src="' + escapeHtml(t.cover) + '" alt="">' : '<div style="width:48px;height:48px;background:var(--surface);border-radius:6px"></div>') +
         '<div class="meta">' +
-          '<div class="t">' + t.title + '</div>' +
-          '<div class="a">' + t.artist + '</div>' +
+          '<div class="t">' + escapeHtml(t.title) + '</div>' +
+          '<div class="a">' + escapeHtml(t.artist) + '</div>' +
         '</div>' +
-        '<span class="yr">' + t.year + '</span>' +
+        '<span class="yr">' + escapeHtml(t.year) + '</span>' +
       '</div>'
     ).join('');
 
@@ -86,8 +86,8 @@
     document.getElementById('input-artist').value = track.artist;
     document.getElementById('input-year').value = track.year;
     resultsEl.innerHTML = '<div class="search-result" style="background:var(--surface-light);border:1px solid var(--green);border-radius:10px">' +
-      (track.cover ? '<img src="' + track.cover + '" alt="">' : '') +
-      '<div class="meta"><div class="t">' + track.title + '</div><div class="a">' + track.artist + '</div></div>' +
+      (track.cover ? '<img src="' + escapeHtml(track.cover) + '" alt="">' : '') +
+      '<div class="meta"><div class="t">' + escapeHtml(track.title) + '</div><div class="a">' + escapeHtml(track.artist) + '</div></div>' +
       '<span style="color:var(--green);font-size:.8rem">Ausgewählt ✓</span></div>';
   }
 
@@ -117,7 +117,7 @@
     const prevManual = playlistSelect.value;
     const prevAuto = autoPlaylistSelect.value;
 
-    const options = playlists.map((p) => '<option value="' + p.id + '">' + p.name + '</option>').join('');
+    const options = playlists.map((p) => '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + '</option>').join('');
     playlistSelect.innerHTML = options;
     autoPlaylistSelect.innerHTML = options;
     if (playlists.some((p) => p.id === prevManual)) playlistSelect.value = prevManual;
@@ -125,8 +125,8 @@
 
     playlistListEl.innerHTML = playlists.map((p) =>
       '<div class="flex justify-between items-center" style="padding:.4rem 0">' +
-        '<span style="font-size:.85rem">' + p.name + '</span>' +
-        '<button type="button" class="btn btn-secondary" data-delete-playlist="' + p.id + '" ' +
+        '<span style="font-size:.85rem">' + escapeHtml(p.name) + '</span>' +
+        '<button type="button" class="btn btn-secondary" data-delete-playlist="' + escapeHtml(p.id) + '" ' +
         'style="font-size:.7rem;padding:.25rem .5rem" ' + (playlists.length <= 1 ? 'disabled title="Mindestens eine Playlist muss übrig bleiben"' : '') + '>✕</button>' +
       '</div>'
     ).join('');
@@ -188,12 +188,12 @@
       const resp = await fetch('/api/spotify/playlist-random?room=' + encodeURIComponent(roomCode) + '&playlist=' + playlistSelect.value);
       const data = await resp.json();
       if (data.error) {
-        resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">' + data.error + '</p>';
+        resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">' + escapeHtml(data.error) + '</p>';
         return;
       }
       selectSpotifyTrack(data.track);
     } catch (e) {
-      resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">Fehler: ' + e.message + '</p>';
+      resultsEl.innerHTML = '<p style="color:var(--pink);padding:.5rem">Fehler: ' + escapeHtml(e.message) + '</p>';
     }
   }
 
@@ -457,12 +457,12 @@
       show('sec-song');
       let html = '';
       if (state.currentSong.cover) {
-        html += '<img src="' + state.currentSong.cover + '" style="width:60px;height:60px;border-radius:8px;vertical-align:middle;margin-right:.75rem">';
+        html += '<img src="' + escapeHtml(state.currentSong.cover) + '" style="width:60px;height:60px;border-radius:8px;vertical-align:middle;margin-right:.75rem">';
       }
-      html += '<span class="song-title" style="font-size:1.1rem">' + state.currentSong.title + '</span>';
+      html += '<span class="song-title" style="font-size:1.1rem">' + escapeHtml(state.currentSong.title) + '</span>';
       html += '<span style="color:var(--text-dim);margin:0 .5rem">—</span>';
-      html += '<span class="song-artist" style="font-size:.9rem">' + state.currentSong.artist + '</span>';
-      if (state.currentSong.year) html += '<span class="song-meta" style="margin-left:.75rem">' + state.currentSong.year + '</span>';
+      html += '<span class="song-artist" style="font-size:.9rem">' + escapeHtml(state.currentSong.artist) + '</span>';
+      if (state.currentSong.year) html += '<span class="song-meta" style="margin-left:.75rem">' + escapeHtml(state.currentSong.year) + '</span>';
       document.getElementById('song-display').innerHTML = html;
     } else {
       hide('sec-song');
@@ -475,14 +475,14 @@
         const ans = state.answers[t.id];
         let right = '';
         if (gs === 'revealing' && ans) {
-          right = '<span style="color:var(--gold);font-weight:600">' + ans + '</span>';
+          right = '<span style="color:var(--gold);font-weight:600">' + escapeHtml(ans) + '</span>';
         } else if (gs === 'playing' && ans) {
           right = '<span style="color:var(--green);font-size:.8rem">eingegangen</span>';
         }
         return '<div class="answer-item">' +
           '<div class="flex items-center gap-sm">' +
             '<span class="dot ' + (ans ? 'on' : 'off') + '"></span>' +
-            '<span>' + t.emoji + ' ' + t.name + '</span>' +
+            '<span>' + escapeHtml(t.emoji) + ' ' + escapeHtml(t.name) + '</span>' +
           '</div>' + right + '</div>';
       }).join('');
     } else {
@@ -495,12 +495,12 @@
       return '<div class="card' + winner + '" style="padding:1rem">' +
         '<div class="flex items-center justify-between mb">' +
           '<div class="flex items-center gap-sm">' +
-            '<span style="font-size:1.25rem">' + t.emoji + '</span>' +
-            '<span style="font-weight:600">' + t.name + '</span>' +
+            '<span style="font-size:1.25rem">' + escapeHtml(t.emoji) + '</span>' +
+            '<span style="font-weight:600">' + escapeHtml(t.name) + '</span>' +
           '</div>' +
           '<div class="flex items-center gap-sm">' +
             '<span style="color:var(--text-dim);font-size:.8rem">' + t.score + ' Punkte</span>' +
-            '<button class="btn-kick" data-team="' + t.id + '" data-name="' + t.name + '" title="Team entfernen">✕</button>' +
+            '<button class="btn-kick" data-team="' + escapeHtml(t.id) + '" data-name="' + escapeHtml(t.name) + '" title="Team entfernen">✕</button>' +
           '</div>' +
         '</div>' +
         '<div id="bingo-mod-' + t.id + '" class="bingo-grid small"></div>' +

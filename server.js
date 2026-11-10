@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const querystring = require('querystring');
 const QRCode = require('qrcode');
+const { validateTeamName, validateTeamEmoji } = require('./lib/teamInput');
 
 // ── Secrets from .env ────────────────────────────────────────────
 // Passwords and API secrets never live in this file (the repository is
@@ -1078,10 +1079,13 @@ function createSession(roomCode, name, restore) {
       return { ok: true, teamId };
     }
 
-    const name = typeof data.name === 'string' ? data.name.trim() : '';
-    const emoji = data.emoji || '🚀';
+    const nameCheck = validateTeamName(data.name);
+    if (!nameCheck.ok) return nameCheck;
+    const emojiCheck = validateTeamEmoji(data.emoji);
+    if (!emojiCheck.ok) return emojiCheck;
+    const { name } = nameCheck;
+    const { emoji } = emojiCheck;
 
-    if (!name) return { ok: false, message: 'Teamname fehlt.' };
     if (teams.size >= MAX_TEAMS) return { ok: false, message: 'Maximale Teamanzahl erreicht' };
 
     const nameTaken = [...teams.values()].some(
@@ -1432,7 +1436,8 @@ app.get('/auth/spotify/callback', async (req, res) => {
   // account to a round — Spotify redirects back in that same browser.
   if (!isAuthenticated(req)) return res.status(401).send('Nicht angemeldet. Bitte zuerst auf der Moderationsseite einloggen und Spotify von dort aus verbinden.');
   const { code, error, state } = req.query;
-  if (error) return res.send('Spotify Auth Fehler: ' + error);
+  // Query values are attacker-controlled: answer as plain text, never HTML.
+  if (error) return res.type('text/plain').send('Spotify Auth Fehler: ' + String(error));
   if (!code) return res.send('Kein Code erhalten');
 
   const session = state && sessions.get(state);
@@ -1452,7 +1457,7 @@ app.get('/auth/spotify/callback', async (req, res) => {
       }),
     });
     const data = await resp.json();
-    if (data.error) return res.send('Token-Fehler: ' + data.error_description);
+    if (data.error) return res.type('text/plain').send('Token-Fehler: ' + String(data.error_description));
 
     session.setSpotifyTokens(data.access_token, data.refresh_token, data.expires_in);
     warmPlaylistCache(data.access_token);

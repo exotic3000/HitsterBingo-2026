@@ -38,8 +38,8 @@
           (i < sorted.length - 1 ? 'border-bottom:1px solid var(--border)' : '') + '">' +
           '<div class="flex items-center gap-sm">' +
             '<span style="font-family:var(--font-display);font-size:.8rem;color:' + color + ';width:24px">#' + (i + 1) + '</span>' +
-            '<span style="font-size:1.25rem">' + t.emoji + '</span>' +
-            '<span style="font-weight:600">' + t.name + '</span>' +
+            '<span style="font-size:1.25rem">' + escapeHtml(t.emoji) + '</span>' +
+            '<span style="font-weight:600">' + escapeHtml(t.name) + '</span>' +
             (t.hasBingo ? '<span style="color:var(--gold);font-size:.7rem;font-family:var(--font-display);margin-left:.5rem">BINGO</span>' : '') +
           '</div>' +
           '<span style="font-family:var(--font-display);font-size:.9rem">' + t.score + '</span>' +
@@ -56,8 +56,8 @@
       return '<div class="card' + winner + '" style="padding:1rem">' +
         '<div class="flex items-center justify-between mb">' +
           '<div class="flex items-center gap-sm">' +
-            '<span style="font-size:1.25rem">' + t.emoji + '</span>' +
-            '<span style="font-weight:600">' + t.name + '</span>' +
+            '<span style="font-size:1.25rem">' + escapeHtml(t.emoji) + '</span>' +
+            '<span style="font-weight:600">' + escapeHtml(t.name) + '</span>' +
           '</div>' +
           '<span style="color:var(--text-dim);font-size:.8rem">' + t.score + ' Punkte</span>' +
         '</div>' +
