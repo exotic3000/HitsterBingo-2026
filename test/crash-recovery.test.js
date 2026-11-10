@@ -72,12 +72,13 @@ test('a round survives a restart: teams, score, current song and the running tim
   assert.equal(restored.teamCount, 1);
   assert.equal(restored.gameState, 'playing');
 
-  // Joined as the overview — it's the view that shows every team's score.
+  // Joined as the moderator — the only view that sees every score *and* the
+  // current song while it is still playing (everyone else gets it at the reveal).
   // Fresh login: without a fixed SESSION_SECRET a restart invalidates cookies.
   const team2 = connectSocket(server.base, roomCode, await login(server.base));
   await waitForEvent(team2, 'game_state');
   const joinedState = waitForEvent(team2, 'game_state');
-  team2.emit('join', { role: 'overview' });
+  team2.emit('join', { role: 'moderator' });
   const state = await joinedState;
 
   assert.equal(state.teams[teamId].name, 'Alpha');

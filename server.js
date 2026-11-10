@@ -696,7 +696,11 @@ function createSession(roomCode, name, restore) {
       viewTeams = Object.fromEntries(all.map((t) => [t.id, t.id === teamId ? t : teamName(t)]));
       if (teamId && answers.has(teamId)) viewAnswers[teamId] = answers.get(teamId);
     }
-    return { ...full, teams: viewTeams, answers: viewAnswers };
+    // The song is the answer: only the moderator may know it before the
+    // reveal (the Beamer and team phones show it from 'revealing' on).
+    // Otherwise any team could read it from the WebSocket traffic.
+    const currentSong = gameState === 'revealing' ? full.currentSong : null;
+    return { ...full, teams: viewTeams, answers: viewAnswers, currentSong };
   }
 
   function sendState(viewer, full, force) {

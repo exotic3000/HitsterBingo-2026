@@ -102,6 +102,16 @@ test('the overview gets every card but no answer texts', () => {
   assert.deepEqual(s.answers, {});
 });
 
+test('while the song plays, only the moderator knows which song it is', () => {
+  assert.equal(last('mod').gameState, 'playing');
+  assert.equal(last('mod').currentSong.title, 'Song');
+  for (const name of ['display', 'overview', 'setup', 'alpha', 'beta']) {
+    for (const s of views[name].states) {
+      assert.equal(s.currentSong, null, name + ' must not receive the solution before the reveal');
+    }
+  }
+});
+
 test('an answer only reaches the views it changes', async () => {
   const before = Object.fromEntries(Object.entries(views).map(([k, v]) => [k, v.states.length]));
   views.beta.socket.emit('submit_answer', { teamId: views.beta.teamId, answer: 'ABBA' });
@@ -138,5 +148,6 @@ test('round changes still reach everyone', async () => {
   for (const name of Object.keys(views)) {
     assert.equal(views[name].states.length - before[name], 1, name + ' must see the reveal');
     assert.equal(last(name).gameState, 'revealing');
+    assert.equal(last(name).currentSong.title, 'Song', name + ' shows the solution once revealed');
   }
 });
