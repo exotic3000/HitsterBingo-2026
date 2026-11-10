@@ -218,6 +218,18 @@
 
   document.getElementById('btn-start-song').addEventListener('click', doStartSong);
 
+  // ── Login / Geräte ─────────────────────────────────────────────
+  document.getElementById('btn-logout').addEventListener('click', async () => {
+    await fetch('/logout', { method: 'POST' }).catch(() => {});
+    location.href = '/login.html';
+  });
+
+  document.getElementById('btn-logout-others').addEventListener('click', async () => {
+    if (!confirm('Alle anderen Geräte (Beamer, Übersicht, andere Moderatoren) abmelden? Sie müssen sich danach neu einloggen.')) return;
+    const res = await fetch('/api/sessions/logout-others', { method: 'POST' }).catch(() => null);
+    alert(res && res.ok ? 'Alle anderen Geräte sind abgemeldet.' : 'Abmelden fehlgeschlagen.');
+  });
+
   // ── Toggle manual input ────────────────────────────────────────
 
   const btnToggle = document.getElementById('btn-toggle-manual');

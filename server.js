@@ -9,6 +9,7 @@ const querystring = require('querystring');
 const QRCode = require('qrcode');
 const { validateTeamName, validateTeamEmoji } = require('./lib/teamInput');
 const { createLoginThrottle } = require('./lib/loginThrottle');
+const { createSessionStore } = require('./lib/sessions');
 
 // ── Secrets from .env ────────────────────────────────────────────
 // Passwords and API secrets never live in this file (the repository is
@@ -36,16 +37,22 @@ const io = new Server(server);
 
 // ── Site password ───────────────────────────────────────────────
 // Gates every view except team.html (players need to join without a
-// password) and the assets/sockets/APIs every page depends on. Session
-// token is derived from a secret that's regenerated on each server start,
-// so a restart simply logs everyone out again — no persistence needed.
+// password) and the assets/sockets/APIs every page depends on. Every login
+// gets its own signed, expiring session (lib/sessions.js); with a fixed
+// SESSION_SECRET sessions and sign-outs survive a restart.
 // Without a configured password the server makes up a random one per start
 // and prints it, rather than falling back to a value anyone could read on GitHub.
 const SITE_PASSWORD_GENERATED = !process.env.SITE_PASSWORD;
 const SITE_PASSWORD = process.env.SITE_PASSWORD || crypto.randomBytes(6).toString('base64url');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const AUTH_COOKIE = 'hb_auth';
-const AUTH_TOKEN = crypto.createHmac('sha256', SESSION_SECRET).update('authenticated').digest('hex');
+const SESSION_TTL_MS = (Number(process.env.SESSION_TTL_SECONDS) || 24 * 60 * 60) * 1000;
+const SNAPSHOT_FILE = process.env.SNAPSHOT_FILE || path.join(__dirname, '.rooms-snapshot.json');
+const staffSessions = createSessionStore({
+  secret: SESSION_SECRET,
+  ttlMs: SESSION_TTL_MS,
+  file: SNAPSHOT_FILE.replace(/\.json$/, '') + '.sessions.json',
+});
 
 const PROTECTED_PAGES = new Set([
   '/', '/index.html', '/display.html', '/moderator.html',
@@ -66,8 +73,12 @@ function parseCookies(req) {
   return cookies;
 }
 
+function currentSession(req) {
+  return staffSessions.verify(parseCookies(req)[AUTH_COOKIE]);
+}
+
 function isAuthenticated(req) {
-  return parseCookies(req)[AUTH_COOKIE] === AUTH_TOKEN;
+  return currentSession(req) !== null;
 }
 
 // Guards API routes that change/destroy shared state (creating or closing a
@@ -169,14 +180,34 @@ app.post('/login', (req, res) => {
   }
   loginThrottle.reset(client);
 
-  // No Max-Age: a session cookie, cleared when the browser fully closes —
-  // reopening the browser asks for the password again, but a reload or new
-  // tab within the same session doesn't log the moderator out mid-game.
+  setSessionCookie(req, res, staffSessions.issue());
+  res.json({ ok: true });
+});
+
+// No Max-Age: a browser-session cookie, cleared when the browser fully closes
+// — reopening the browser asks for the password again, but a reload or new tab
+// doesn't log the moderator out mid-game. The token itself expires server-side.
+function setSessionCookie(req, res, token, maxAgeZero = false) {
   const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
   res.setHeader('Set-Cookie',
-    AUTH_COOKIE + '=' + AUTH_TOKEN
+    AUTH_COOKIE + '=' + token
     + '; HttpOnly; Path=/'
-    + '; SameSite=Lax' + (isSecure ? '; Secure' : ''));
+    + '; SameSite=Lax' + (isSecure ? '; Secure' : '')
+    + (maxAgeZero ? '; Max-Age=0' : ''));
+}
+
+// Signs out only this device.
+app.post('/logout', (req, res) => {
+  const session = currentSession(req);
+  if (session) staffSessions.revoke(session);
+  setSessionCookie(req, res, '', true);
+  res.json({ ok: true });
+});
+
+// Ends every other session (e.g. a lost phone) and gives this device a new one.
+app.post('/api/sessions/logout-others', requireAuth, (req, res) => {
+  staffSessions.revokeAllBefore();
+  setSessionCookie(req, res, staffSessions.issue());
   res.json({ ok: true });
 });
 
@@ -233,7 +264,7 @@ const MYSTERY_SUBS = [
 const MAX_TEAMS = 10;
 const BINGO_SIZE = 5;
 const TIMER_SECONDS = 60;
-const TEAM_DISCONNECT_GRACE_MS = 450000;
+const TEAM_DISCONNECT_GRACE_MS = Number(process.env.TEAM_DISCONNECT_GRACE_MS) || 450000;
 
 // Vermeidet, dass kurz hintereinander derselbe Song aus derselben Playlist
 // gezogen wird — wie Spotifys "kein Wiederholen"-Shuffle. In
@@ -1299,7 +1330,6 @@ function createSession(roomCode, name, restore) {
 
 // Overridable so parallel test runs (each spawning their own server) don't
 // clobber each other's or the real dev snapshot on disk.
-const SNAPSHOT_FILE = process.env.SNAPSHOT_FILE || path.join(__dirname, '.rooms-snapshot.json');
 const SNAPSHOT_INTERVAL_MS = 30000;
 
 function snapshotSessions() {

@@ -145,6 +145,12 @@
     <!-- Team Bingo Cards -->
     <h3 style="font-size:.9rem;margin-bottom:.75rem;color:var(--cyan)">Bingokarten der Teams</h3>
     <div id="team-cards" class="teams-grid"></div>
+
+    <!-- Login / Geräte -->
+    <div class="flex items-center gap-sm" style="margin-top:2rem;flex-wrap:wrap">
+      <button id="btn-logout" type="button" class="btn btn-secondary" style="font-size:.7rem;padding:.35rem .6rem">Abmelden</button>
+      <button id="btn-logout-others" type="button" class="btn btn-secondary" style="font-size:.7rem;padding:.35rem .6rem">Alle anderen Geräte abmelden</button>
+    </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

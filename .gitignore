@@ -5,3 +5,6 @@ dist
 .rooms-snapshot.json
 .playlists.json
 .env
+.loadtest-*
+loadtest/results/
+.rooms-snapshot.sessions.json
