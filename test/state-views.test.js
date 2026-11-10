@@ -126,9 +126,28 @@ test('an answer only reaches the views it changes', async () => {
   assert.equal(got('setup'), 0);
 });
 
-test('ticking a cell only reaches the team itself, the moderator and the overview', async () => {
+test('round changes still reach everyone', async () => {
   const before = Object.fromEntries(Object.entries(views).map(([k, v]) => [k, v.states.length]));
-  views.alpha.socket.emit('mark_correct', { teamId: views.alpha.teamId, row: 0, col: 0 });
+  views.mod.socket.emit('reveal_solution');
+  await sleep(300);
+  for (const name of Object.keys(views)) {
+    assert.equal(views[name].states.length - before[name], 1, name + ' must see the reveal');
+    assert.equal(last(name).gameState, 'revealing');
+    assert.equal(last(name).currentSong.title, 'Song', name + ' shows the solution once revealed');
+  }
+});
+
+test('ticking a cell only reaches the team itself, the moderator and the overview', async () => {
+  // Teams may tick only while the solution is shown (revealed by the test
+  // above), a cell of the round's category.
+  const modView = last('mod');
+  const category = modView.currentCategory.id;
+  const alphaCard = modView.teams[views.alpha.teamId].bingoCard;
+  const row = alphaCard.findIndex((r) => r.some((cell) => cell.categoryId === category));
+  const col = alphaCard[row].findIndex((cell) => cell.categoryId === category);
+
+  const before = Object.fromEntries(Object.entries(views).map(([k, v]) => [k, v.states.length]));
+  views.alpha.socket.emit('mark_correct', { teamId: views.alpha.teamId, row, col });
   await sleep(300);
   const got = (k) => views[k].states.length - before[k];
 
@@ -139,15 +158,4 @@ test('ticking a cell only reaches the team itself, the moderator and the overvie
   assert.equal(got('display'), 0, 'no Bingo yet, so nothing changes on the Beamer');
   assert.equal(got('setup'), 0);
   assert.equal(last('alpha').teams[views.alpha.teamId].score, 1);
-});
-
-test('round changes still reach everyone', async () => {
-  const before = Object.fromEntries(Object.entries(views).map(([k, v]) => [k, v.states.length]));
-  views.mod.socket.emit('reveal_solution');
-  await sleep(300);
-  for (const name of Object.keys(views)) {
-    assert.equal(views[name].states.length - before[name], 1, name + ' must see the reveal');
-    assert.equal(last(name).gameState, 'revealing');
-    assert.equal(last(name).currentSong.title, 'Song', name + ' shows the solution once revealed');
-  }
 });

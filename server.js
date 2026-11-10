@@ -1096,6 +1096,7 @@ function createSession(roomCode, name, restore) {
       team.bingoCard = generateBingoCard();
       team.score = 0;
       team.hasBingo = false;
+      team.selfMark = null;
     }
     stopPlayback();
     broadcast();
@@ -1162,10 +1163,22 @@ function createSession(roomCode, name, restore) {
   // fires 'disconnect' and would otherwise wipe a still-playing team. The
   // 'join' resume path (resolveTeamJoin above) cancels this if the same
   // team reconnects in time.
+  //
+  // A phone switching networks reconnects on a new socket *before* the
+  // server notices its old one is dead (ping timeout, ~45 s) — so a
+  // disconnect only counts once the team has no connection left at all,
+  // checked again when the grace period runs out.
+  function teamIsConnected(teamId) {
+    const room = io.sockets.adapter.rooms.get('team_' + teamId);
+    return Boolean(room && room.size > 0);
+  }
+
   function handleTeamDisconnect(teamId) {
+    if (teamIsConnected(teamId)) return;
+    clearTimeout(pendingTeamRemoval.get(teamId));
     const timer = setTimeout(() => {
       pendingTeamRemoval.delete(teamId);
-      if (!teams.has(teamId)) return;
+      if (!teams.has(teamId) || teamIsConnected(teamId)) return;
       teams.delete(teamId);
       teamSecrets.delete(teamId);
       answers.delete(teamId);
@@ -1180,14 +1193,47 @@ function createSession(roomCode, name, restore) {
     broadcast();
   }
 
+  function updateScore(team) {
+    team.score = team.bingoCard.flat().filter(c => c.checked).length;
+    team.hasBingo = checkBingo(team.bingoCard);
+    broadcast();
+  }
+
+  function isTeamsTickThisRound(team, row, col) {
+    const mark = team.selfMark;
+    return Boolean(mark) && mark.round === currentRound && mark.row === row && mark.col === col;
+  }
+
+  // Moderator: may tick or untick any cell on any card.
   function markCorrect(teamId, row, col) {
     const team = teams.get(teamId);
     if (!team) return;
     const cell = team.bingoCard[row][col];
     cell.checked = !cell.checked;
-    team.score = team.bingoCard.flat().filter(c => c.checked).length;
-    team.hasBingo = checkBingo(team.bingoCard);
-    broadcast();
+    // Undoing the team's own tick of this round lets the team pick again.
+    if (!cell.checked && isTeamsTickThisRound(team, row, col)) team.selfMark = null;
+    updateScore(team);
+  }
+
+  // Team on its own phone: only while the solution is shown, only a cell of
+  // the round's category, at most one per round — and only that one can be
+  // taken back. Keeps self-marking fair without the moderator ticking it all.
+  function markByTeam(teamId, row, col) {
+    const team = teams.get(teamId);
+    if (!team || gameState !== 'revealing' || !currentCategory) return;
+    const cell = team.bingoCard[row][col];
+
+    if (isTeamsTickThisRound(team, row, col)) {
+      cell.checked = false;
+      team.selfMark = null;
+      return updateScore(team);
+    }
+
+    const alreadyTickedThisRound = team.selfMark && team.selfMark.round === currentRound;
+    if (alreadyTickedThisRound || cell.checked || cell.categoryId !== currentCategory.id) return;
+    cell.checked = true;
+    team.selfMark = { round: currentRound, row, col };
+    updateScore(team);
   }
 
   function kickTeam(teamId) {
@@ -1304,6 +1350,7 @@ function createSession(roomCode, name, restore) {
     handleTeamDisconnect,
     submitAnswer,
     markCorrect,
+    markByTeam,
     kickTeam,
     setAutoModerator,
     clearAutoModeratorTimer,
@@ -1735,7 +1782,8 @@ io.on('connection', (socket) => {
     if (!data || !isCellIndex(data.row) || !isCellIndex(data.col)) return;
     const teamId = socket.isStaff ? data.teamId : socket.teamId;
     if (!teamId || (!socket.isStaff && data.teamId !== socket.teamId)) return;
-    session.markCorrect(teamId, data.row, data.col);
+    if (socket.isStaff) session.markCorrect(teamId, data.row, data.col);
+    else session.markByTeam(teamId, data.row, data.col);
   });
 
   socket.on('kick_team', staffOnly((data) => {

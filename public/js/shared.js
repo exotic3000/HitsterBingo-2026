@@ -90,7 +90,8 @@ function showRoomUnavailableOverlay() {
 /* ── Bingo card renderer ────────────────────────────────────── */
 
 function renderBingoCard(container, card, options) {
-  const opts = Object.assign({ small: false, clickable: false, onCellClick: null }, options);
+  // canTap(cell): optional — limits which cells are clickable and highlights them.
+  const opts = Object.assign({ small: false, clickable: false, onCellClick: null, canTap: null }, options);
   container.innerHTML = '';
   container.className = 'bingo-grid' + (opts.small ? ' small' : '');
 
@@ -106,7 +107,9 @@ function renderBingoCard(container, card, options) {
       }
       div.title = cat.name;
 
-      if (opts.clickable) {
+      const tappable = opts.clickable && (!opts.canTap || opts.canTap(cell));
+      if (tappable && opts.canTap) div.style.outline = '2px solid var(--gold)';
+      if (tappable) {
         div.style.cursor = 'pointer';
         div.addEventListener('click', () => {
           if (opts.onCellClick) opts.onCellClick(r, c);

@@ -47,7 +47,8 @@ test('a round survives a restart: teams, score, current song and the running tim
   await sleep(300);
   assert.equal(lastState.gameState, 'playing');
 
-  team.emit('mark_correct', { teamId, row: 0, col: 0 });
+  // Teams may only tick while the solution is shown; the moderator anytime.
+  mod.emit('mark_correct', { teamId, row: 0, col: 0 });
   await sleep(200);
   const scoreBeforeRestart = lastState.teams[teamId].score;
   assert.equal(scoreBeforeRestart, 1);

@@ -160,12 +160,14 @@
     document.getElementById('answer-echo').textContent = '„' + val + '"';
   }
 
-  // Own bingo card is clickable everywhere — teams self-mark a cell correct
-  // once they've checked their answer against the revealed solution. This
-  // used to be a separate "Teamer" device's job; folding it in here means a
-  // team only needs one phone.
+  // Teams self-mark a cell correct once they've checked their answer against
+  // the revealed solution — only while it is shown and only cells of the
+  // round's category (highlighted). The server also allows just one tick per
+  // round; tapping that cell again takes it back.
   const cardOptions = {
     clickable: true,
+    canTap: (cell) => Boolean(lastState && lastState.gameState === 'revealing'
+      && lastState.currentCategory && cell.categoryId === lastState.currentCategory.id),
     onCellClick: (row, col) => socket.emit('mark_correct', { teamId: myTeamId, row, col }),
   };
 
