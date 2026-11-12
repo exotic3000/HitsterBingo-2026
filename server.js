@@ -1846,11 +1846,14 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(PORT, () => {
+// Only the Cloudflare tunnel (localhost) needs to reach the game; set HOST=0.0.0.0
+// to play directly over the LAN without the tunnel.
+const HOST = process.env.HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  🚀 Hitster Bingo - Space Edition');
   console.log('  ─────────────────────────────────');
-  console.log('  Server:     http://localhost:' + PORT);
+  console.log('  Server:     http://localhost:' + PORT + '  (lauscht auf ' + HOST + ')');
   console.log('  Rundenverwaltung: http://localhost:' + PORT + '/');
   console.log('');
   if (SITE_PASSWORD_GENERATED) {

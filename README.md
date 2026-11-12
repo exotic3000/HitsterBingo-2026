@@ -78,6 +78,7 @@ Einstellungen kommen aus der `.env`-Datei (Vorlage: `.env.example`) oder aus Umg
 - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` — Spotify-App-Zugangsdaten, ohne sie keine Spotify-Funktionen
 - `SPOTIFY_REDIRECT_URI` — muss exakt im Spotify-Dashboard hinterlegt sein
 - `PORT` — Server-Port (Standard 3000)
+- `HOST` — Adresse, auf der der Server lauscht (Standard `127.0.0.1`, nur lokal bzw. über den Cloudflare-Tunnel; `0.0.0.0` für direktes Spielen im WLAN)
 - `PLAYLIST_CACHE_TTL_MS` — wie lange eine geladene Playlist zwischengespeichert wird (Standard 1800000 = 30 Minuten)
 - `PLAYBACK_CONFIRM_TIMEOUT_MS` — wie lange der Timer nach dem Songstart höchstens auf die Rückmeldung „Song läuft“ vom Beamer wartet (Standard 6000)
 
