@@ -9,6 +9,7 @@
   const SECRET_KEY = 'hitsterbingo_team_secret_' + (getRoomCode() || 'none');
 
   let myTeamId = null;
+  let lastSeenState = null; // { epoch, version } of the state on screen
   let selectedEmoji = '🚀';
   let submitted = false;
   let lastRound = -1;
@@ -173,6 +174,9 @@
 
   // Game state
   socket.on('game_state', (state) => {
+    // Drop late packets from before a reconnect; a new session always applies.
+    if (!shouldApplyState(lastSeenState, state)) return;
+    lastSeenState = { epoch: state.stateEpoch, version: state.stateVersion };
     lastState = state;
     applyGameState(state);
   });
