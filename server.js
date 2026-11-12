@@ -530,6 +530,10 @@ function createSession(roomCode, name, restore) {
   let currentCategory = (restore && restore.currentCategory) || null;
   let currentMysterySub = (restore && restore.currentMysterySub) || null;
   let currentSong = (restore && restore.currentSong) || null;
+  // Sequence number + session id for the team phones' out-of-order guard
+  // (public/js/state-order.js); both survive a restart via the snapshot.
+  let stateVersion = (restore && restore.stateVersion) || 1;
+  const stateEpoch = (restore && restore.stateEpoch) || crypto.randomBytes(6).toString('hex');
   // Verhindert, dass zwei Runden in Folge dieselbe Kategorie ziehen.
   let lastCategoryId = (restore && restore.lastCategoryId) || null;
   // playlistId -> zuletzt gespielte Spotify-Track-IDs dieser Playlist, damit
@@ -656,6 +660,8 @@ function createSession(roomCode, name, restore) {
       answers: Object.fromEntries(answers),
       timerValue,
       paused,
+      stateVersion,
+      stateEpoch,
       categories: CATEGORIES,
       spotifyReady: !!spotifyAccessToken,
       spotifyPlayerReady: !!playerDeviceId,
@@ -705,13 +711,18 @@ function createSession(roomCode, name, restore) {
 
   function sendState(viewer, full, force) {
     const view = stateForView(full, viewer.role, viewer.teamId);
-    const json = JSON.stringify(view);
+    // stateVersion is a global sequence number for divergence detection; it
+    // must not participate in the per-view dedup, otherwise every broadcast
+    // wakes up devices whose view did not actually change.
+    const { stateVersion: _sv, ...dedupView } = view;
+    const json = JSON.stringify(dedupView);
     if (!force && json === viewer.lastSent) return;
     viewer.lastSent = json;
     viewer.socket.emit('game_state', view);
   }
 
   function broadcast() {
+    stateVersion++;
     const full = getFullState();
     for (const viewer of viewers.values()) sendState(viewer, full, false);
   }
@@ -1316,6 +1327,8 @@ function createSession(roomCode, name, restore) {
       autoModeratorPlaylist,
       lastCategoryId,
       recentTracksByPlaylist: [...recentTracksByPlaylist.entries()],
+      stateVersion,
+      stateEpoch,
     };
   }
 
